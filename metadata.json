@@ -1,0 +1,8 @@
+{
+  "name": "LibertadGO - Intelligent Travel Planner",
+  "description": "Planificador turístico inteligente para La Libertad, Perú. Diseña itinerarios, descubre gastronomía, playas y patrimonio arqueológico con mapas interactivos y asistencia experta.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
