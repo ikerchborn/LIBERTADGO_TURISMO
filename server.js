@@ -2642,6 +2642,7 @@ var init_postgresCreatorsRepository = __esm({
 // src/server/repositories/index.ts
 var repositories_exports = {};
 __export(repositories_exports, {
+  checkDatabaseHealth: () => checkDatabaseHealth,
   closeDatabaseConnections: () => closeDatabaseConnections,
   getAuthRepository: () => getAuthRepository,
   getCreatorsRepository: () => getCreatorsRepository,
@@ -2789,6 +2790,46 @@ async function verifyDatabaseConnectivity() {
       "[Storage Architecture] FATAL: Persistent PostgreSQL adapter is mandatory in production. In-memory adapter cannot be used."
     );
   }
+}
+async function checkDatabaseHealth() {
+  const isProduction = process.env.NODE_ENV === "production";
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl || !isValidPostgresUrl(databaseUrl)) {
+    return {
+      connected: false,
+      adapter: isProduction ? "none" : "memory",
+      error: "DATABASE_URL is not configured or invalid"
+    };
+  }
+  try {
+    getCreatorsRepository();
+  } catch {
+    return {
+      connected: false,
+      adapter: isProduction ? "none" : "memory",
+      error: "Failed to initialize database adapter"
+    };
+  }
+  if (activeDatabaseAdapter && typeof activeDatabaseAdapter.testConnection === "function") {
+    try {
+      await activeDatabaseAdapter.testConnection();
+      return {
+        connected: true,
+        adapter: "postgres"
+      };
+    } catch {
+      return {
+        connected: false,
+        adapter: isProduction ? "none" : "memory",
+        error: "Database ping failed"
+      };
+    }
+  }
+  return {
+    connected: false,
+    adapter: isProduction ? "none" : "memory",
+    error: "No active persistent database adapter"
+  };
 }
 function setActiveDatabaseAdapterForTesting(adapter) {
   activeDatabaseAdapter = adapter;
@@ -4510,7 +4551,18 @@ adminRouter.put("/moderation/:id/places", async (req, res) => {
 });
 
 // src/server/routes.ts
+init_repositories();
 var apiRouter = Router4();
+apiRouter.get("/health", async (_req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  const dbHealth = await checkDatabaseHealth();
+  res.json({
+    status: dbHealth.connected ? "healthy" : "degraded",
+    database: dbHealth.connected ? "connected" : "not_configured",
+    environment: process.env.NODE_ENV === "production" ? "production" : "development",
+    timestamp: (/* @__PURE__ */ new Date()).toISOString()
+  });
+});
 apiRouter.use(authMiddleware);
 apiRouter.use("/auth", authRouter);
 apiRouter.use("/creators", creatorsRouter);
@@ -4834,17 +4886,21 @@ async function startServer() {
   const distPath = path.resolve(__dirname, "dist");
   const isProduction = process.env.NODE_ENV === "production" && fs.existsSync(path.join(distPath, "index.html"));
   app.use(express.json());
-  app.get("/api/health", (_req, res) => {
+  const handleHealthCheck = async (_req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    const dbHealth = await checkDatabaseHealth();
     res.json({
-      status: configError ? "degraded" : "healthy",
-      database: configError ? "not_configured" : "connected",
-      error: configError || null,
+      status: dbHealth.connected ? "healthy" : "degraded",
+      database: dbHealth.connected ? "connected" : "not_configured",
       environment: isProduction ? "production" : "development",
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-  });
+  };
+  app.get("/api/health", handleHealthCheck);
+  app.get("/health", handleHealthCheck);
   if (configError) {
     app.use(["/api/auth", "/api/creators", "/api/admin"], (_req, res) => {
+      res.setHeader("Content-Type", "application/json");
       res.status(503).json({
         success: false,
         error: "Servicio no disponible: configuraci\xF3n de producci\xF3n incompleta en Cloud Run.",
@@ -4856,10 +4912,19 @@ async function startServer() {
   app.use(express.static(path.resolve(__dirname, "public")));
   if (isProduction) {
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
+    app.get("*", (req, res) => {
+      if (req.path.startsWith("/api")) {
+        res.setHeader("Content-Type", "application/json");
+        res.status(404).json({ success: false, error: "Endpoint API no encontrado" });
+        return;
+      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   } else {
+    app.use("/api", (_req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.status(404).json({ success: false, error: "Endpoint API no encontrado" });
+    });
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"

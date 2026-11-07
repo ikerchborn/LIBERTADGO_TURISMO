@@ -174,6 +174,59 @@ export async function verifyDatabaseConnectivity(): Promise<void> {
 }
 
 /**
+ * Real-time health check for database connection
+ * Returns connectivity status without exposing credentials or secrets.
+ */
+export async function checkDatabaseHealth(): Promise<{
+  connected: boolean;
+  adapter: 'postgres' | 'memory' | 'none';
+  error?: string;
+}> {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+
+  if (!databaseUrl || !isValidPostgresUrl(databaseUrl)) {
+    return {
+      connected: false,
+      adapter: isProduction ? 'none' : 'memory',
+      error: 'DATABASE_URL is not configured or invalid',
+    };
+  }
+
+  try {
+    getCreatorsRepository();
+  } catch {
+    return {
+      connected: false,
+      adapter: isProduction ? 'none' : 'memory',
+      error: 'Failed to initialize database adapter',
+    };
+  }
+
+  if (activeDatabaseAdapter && typeof activeDatabaseAdapter.testConnection === 'function') {
+    try {
+      await activeDatabaseAdapter.testConnection();
+      return {
+        connected: true,
+        adapter: 'postgres',
+      };
+    } catch {
+      return {
+        connected: false,
+        adapter: isProduction ? 'none' : 'memory',
+        error: 'Database ping failed',
+      };
+    }
+  }
+
+  return {
+    connected: false,
+    adapter: isProduction ? 'none' : 'memory',
+    error: 'No active persistent database adapter',
+  };
+}
+
+/**
  * Test isolation helpers
  */
 export function setActiveDatabaseAdapterForTesting(

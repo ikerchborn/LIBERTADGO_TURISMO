@@ -6,7 +6,21 @@ import { creatorsRouter } from './creatorsRoutes.ts';
 import { adminRouter } from './adminRoutes.ts';
 import { authMiddleware } from './authService.ts';
 
+import { checkDatabaseHealth } from './repositories/index.ts';
+
 export const apiRouter = Router();
+
+// GET /api/health - Public health check returning application/json status
+apiRouter.get('/health', async (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  const dbHealth = await checkDatabaseHealth();
+  res.json({
+    status: dbHealth.connected ? 'healthy' : 'degraded',
+    database: dbHealth.connected ? 'connected' : 'not_configured',
+    environment: process.env.NODE_ENV === 'production' ? 'production' : 'development',
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Apply auth token parser across all /api routes
 apiRouter.use(authMiddleware);

@@ -10,6 +10,7 @@ import { bootstrapAdminFromEnv, validateSecurityConfig } from './src/server/auth
 import {
   validateDatabaseConfig,
   verifyDatabaseConnectivity,
+  checkDatabaseHealth,
   closeDatabaseConnections,
 } from './src/server/repositories/index.ts';
 
@@ -101,20 +102,25 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Cloud Run & Uptime health check endpoint
-  app.get('/api/health', (_req, res) => {
+  // High-priority Health Endpoints for Cloud Run & Uptime Monitoring
+  const handleHealthCheck = async (_req: express.Request, res: express.Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    const dbHealth = await checkDatabaseHealth();
     res.json({
-      status: configError ? 'degraded' : 'healthy',
-      database: configError ? 'not_configured' : 'connected',
-      error: configError || null,
+      status: dbHealth.connected ? 'healthy' : 'degraded',
+      database: dbHealth.connected ? 'connected' : 'not_configured',
       environment: isProduction ? 'production' : 'development',
       timestamp: new Date().toISOString(),
     });
-  });
+  };
+
+  app.get('/api/health', handleHealthCheck);
+  app.get('/health', handleHealthCheck);
 
   // If production security or database configuration is incomplete, protect database endpoints
   if (configError) {
     app.use(['/api/auth', '/api/creators', '/api/admin'], (_req, res) => {
+      res.setHeader('Content-Type', 'application/json');
       res.status(503).json({
         success: false,
         error: 'Servicio no disponible: configuración de producción incompleta en Cloud Run.',
@@ -133,11 +139,23 @@ async function startServer() {
     // Frontend compilado por Vite
     app.use(express.static(distPath));
 
-    // Rutas de React
-    app.get('*', (_req, res) => {
+    // Fallback exclusivo para rutas web de la SPA React
+    app.get('*', (req, res) => {
+      // Bloquear estrictamente que cualquier solicitud a /api/* devuelva el HTML de la SPA
+      if (req.path.startsWith('/api')) {
+        res.setHeader('Content-Type', 'application/json');
+        res.status(404).json({ success: false, error: 'Endpoint API no encontrado' });
+        return;
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
+    // En desarrollo, evitar que solicitudes no coincidentes de /api caigan en el middleware SPA de Vite
+    app.use('/api', (_req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.status(404).json({ success: false, error: 'Endpoint API no encontrado' });
+    });
+
     // Servidor de desarrollo Vite
     const vite = await createViteServer({
       server: { middlewareMode: true },

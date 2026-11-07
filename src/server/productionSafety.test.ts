@@ -4,6 +4,7 @@ import {
   isValidPostgresUrl,
   validateDatabaseConfig,
   verifyDatabaseConnectivity,
+  checkDatabaseHealth,
   getCreatorsRepository,
   setActiveDatabaseAdapterForTesting,
   resetRepositoriesForTesting,
@@ -326,5 +327,103 @@ test('9. Reinicios: no modifica las credenciales ni el rol del administrador exi
     } else {
       delete process.env.ADMIN_INITIAL_PASSWORD;
     }
+  }
+});
+
+// 10. checkDatabaseHealth: informa connected: true cuando PostgreSQL responde al ping
+test('10. checkDatabaseHealth: informa connected: true cuando PostgreSQL responde al ping', async () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalDbUrl = process.env.DATABASE_URL;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.DATABASE_URL = 'postgresql://user:secret@ep-neon.us-east-1.aws.neon.tech/neondb?sslmode=require';
+
+    let pingQueryExecuted = false;
+    const mockSuccessAdapter = {
+      testConnection: async () => {
+        pingQueryExecuted = true;
+      },
+      close: async () => {},
+    };
+    setActiveDatabaseAdapterForTesting(mockSuccessAdapter as any);
+
+    const health = await checkDatabaseHealth();
+    assert.equal(health.connected, true);
+    assert.equal(health.adapter, 'postgres');
+    assert.equal(health.error, undefined);
+    assert.equal(pingQueryExecuted, true);
+  } finally {
+    resetRepositoriesForTesting();
+    process.env.NODE_ENV = originalEnv;
+    if (originalDbUrl !== undefined) process.env.DATABASE_URL = originalDbUrl;
+    else delete process.env.DATABASE_URL;
+  }
+});
+
+// 11. checkDatabaseHealth: informa connected: false sin DATABASE_URL o si falla el ping
+test('11. checkDatabaseHealth: informa connected: false sin DATABASE_URL o si falla el ping', async () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalDbUrl = process.env.DATABASE_URL;
+
+  try {
+    // 11a. Sin DATABASE_URL en producción
+    process.env.NODE_ENV = 'production';
+    delete process.env.DATABASE_URL;
+    resetRepositoriesForTesting();
+
+    const healthNoDb = await checkDatabaseHealth();
+    assert.equal(healthNoDb.connected, false);
+    assert.equal(healthNoDb.adapter, 'none');
+
+    // 11b. Con DATABASE_URL pero ping falla
+    process.env.DATABASE_URL = 'postgresql://user:secret@ep-offline.us-east-1.aws.neon.tech/neondb';
+    const mockFailingAdapter = {
+      testConnection: async () => {
+        throw new Error('Connection timeout to Neon');
+      },
+      close: async () => {},
+    };
+    setActiveDatabaseAdapterForTesting(mockFailingAdapter as any);
+
+    const healthFailing = await checkDatabaseHealth();
+    assert.equal(healthFailing.connected, false);
+    assert.equal(healthFailing.error, 'Database ping failed');
+  } finally {
+    resetRepositoriesForTesting();
+    process.env.NODE_ENV = originalEnv;
+    if (originalDbUrl !== undefined) process.env.DATABASE_URL = originalDbUrl;
+    else delete process.env.DATABASE_URL;
+  }
+});
+
+// 12. checkDatabaseHealth: nunca filtra credenciales ni connection string en caso de error
+test('12. checkDatabaseHealth: nunca filtra credenciales ni connection string en caso de error', async () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalDbUrl = process.env.DATABASE_URL;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    const sensitivePass = 'super_secret_neon_password_xyz123';
+    process.env.DATABASE_URL = `postgresql://admin:${sensitivePass}@ep-offline.us-east-1.aws.neon.tech/neondb`;
+
+    const mockFailingAdapter = {
+      testConnection: async () => {
+        throw new Error(`Failed to authenticate user admin with password ${sensitivePass}`);
+      },
+      close: async () => {},
+    };
+    setActiveDatabaseAdapterForTesting(mockFailingAdapter as any);
+
+    const health = await checkDatabaseHealth();
+    assert.equal(health.connected, false);
+    assert.equal(typeof health.error, 'string');
+    assert.equal(health.error?.includes(sensitivePass), false);
+    assert.equal(health.error?.includes('admin:'), false);
+  } finally {
+    resetRepositoriesForTesting();
+    process.env.NODE_ENV = originalEnv;
+    if (originalDbUrl !== undefined) process.env.DATABASE_URL = originalDbUrl;
+    else delete process.env.DATABASE_URL;
   }
 });
