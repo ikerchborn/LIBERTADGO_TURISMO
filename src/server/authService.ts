@@ -14,29 +14,43 @@ const DEV_DEFAULT_SECRET = 'libertadgo_sec_sig_7b29e01f5c6a84d3e218';
 const TOKEN_EXPIRY_DAYS = 7;
 
 export function getSessionSecret(): string {
-  const secret = process.env.SESSION_SECRET;
+  const secret = process.env.SESSION_SECRET?.trim();
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (isProduction) {
-    if (!secret || secret.trim() === '' || secret === DEV_DEFAULT_SECRET) {
+    if (!secret || secret === DEV_DEFAULT_SECRET || secret.length < 16) {
       throw new Error(
         '[Security] FATAL: SESSION_SECRET is mandatory in production and must not use the development default secret.'
-      );
-    }
-    if (secret.length < 16) {
-      throw new Error(
-        '[Security] FATAL: SESSION_SECRET must be at least 16 characters long in production.'
       );
     }
     return secret;
   }
 
+  // Development / Test fallback
   return secret || DEV_DEFAULT_SECRET;
 }
 
 export function validateSecurityConfig(): void {
-  // Triggers fail-fast check in production
-  getSessionSecret();
+  const secret = process.env.SESSION_SECRET?.trim();
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction) {
+    if (!secret) {
+      throw new Error(
+        '[Security] FATAL: SESSION_SECRET is mandatory in production environment. Refusing to start without configured session secret.'
+      );
+    }
+    if (secret === DEV_DEFAULT_SECRET) {
+      throw new Error(
+        '[Security] FATAL: SESSION_SECRET must not use the development default secret in production environment.'
+      );
+    }
+    if (secret.length < 16) {
+      throw new Error(
+        '[Security] FATAL: SESSION_SECRET must be at least 16 characters long in production environment.'
+      );
+    }
+  }
 }
 
 
@@ -185,23 +199,42 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
  * Bootstrap Initial Admin on First Boot if environment variables are provided
  * Does NOT hardcode any credentials.
  */
-export async function bootstrapAdminFromEnv(): Promise<void> {
-  const email = process.env.ADMIN_INITIAL_EMAIL;
+export async function bootstrapAdminFromEnv(): Promise<{ bootstrapped: boolean; reason?: string }> {
+  const email = process.env.ADMIN_INITIAL_EMAIL?.trim();
   const password = process.env.ADMIN_INITIAL_PASSWORD;
-  const name = process.env.ADMIN_INITIAL_NAME || 'Administrador LibertadGO';
+  const name = process.env.ADMIN_INITIAL_NAME?.trim() || 'Administrador LibertadGO';
 
-  if (!email || !password) return;
+  if (!email || !password) {
+    console.log(
+      '[Security] Admin bootstrap skipped: ADMIN_INITIAL_EMAIL and/or ADMIN_INITIAL_PASSWORD not configured. No administrative account created.'
+    );
+    return { bootstrapped: false, reason: 'missing_credentials' };
+  }
 
-  const authRepo = getAuthRepository();
-  const existing = await authRepo.findUserByEmail(email);
+  try {
+    const authRepo = getAuthRepository();
+    const existing = await authRepo.findUserByEmail(email);
 
-  if (!existing) {
-    console.log(`[Security] Bootstrapping initial admin account for: ${email}`);
-    await authRepo.createUser({
-      email,
-      passwordHash: hashPassword(password),
-      name,
-      role: 'ADMIN',
-    });
+    if (!existing) {
+      console.log(`[Security] Bootstrapping initial admin account for: ${email}`);
+      await authRepo.createUser({
+        email,
+        passwordHash: hashPassword(password),
+        name,
+        role: 'ADMIN',
+      });
+      return { bootstrapped: true };
+    } else {
+      console.log(
+        `[Security] Initial admin account (${email}) already exists. Preserving existing credentials and role during reboot.`
+      );
+      return { bootstrapped: false, reason: 'already_exists' };
+    }
+  } catch (err) {
+    console.warn(
+      '[Security] WARNING: Could not bootstrap initial admin account:',
+      err instanceof Error ? err.message : String(err)
+    );
+    throw err;
   }
 }

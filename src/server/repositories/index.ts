@@ -49,6 +49,12 @@ export function validateDatabaseConfig(): void {
         '[Storage Architecture] FATAL: DATABASE_URL has an invalid PostgreSQL format in production environment.'
       );
     }
+  } else {
+    if (databaseUrl && !isValidPostgresUrl(databaseUrl)) {
+      console.warn(
+        `[Storage Architecture] WARNING: DATABASE_URL provided is not a valid PostgreSQL URL (${databaseUrl.slice(0, 12)}...). Falling back to development In-Memory Adapter.`
+      );
+    }
   }
 }
 
@@ -66,13 +72,12 @@ function initializeRepositories(): {
     if (!isValidPostgresUrl(databaseUrl)) {
       if (isProduction) {
         throw new Error(
-          '[Storage Architecture] FATAL: DATABASE_URL has an invalid PostgreSQL format.'
-        );
-      } else {
-        console.warn(
-          '[Storage Architecture] WARNING: DATABASE_URL provided is not a valid PostgreSQL URL. Falling back to development In-Memory Adapter.'
+          '[Storage Architecture] FATAL: DATABASE_URL has an invalid PostgreSQL format in production environment.'
         );
       }
+      console.warn(
+        '[Storage Architecture] WARNING: DATABASE_URL provided is not a valid PostgreSQL URL. Falling back to development In-Memory Adapter.'
+      );
     } else {
       const sanitized = getSanitizedHost(databaseUrl);
       console.log(`[Storage Architecture] Activating PostgreSQL RDBMS adapter (${sanitized}).`);
@@ -85,10 +90,10 @@ function initializeRepositories(): {
     }
   }
 
-  // Development Fallback
+  // Strictly forbid in-memory fallback in production
   if (isProduction) {
     throw new Error(
-      '[Storage Architecture] FATAL: Silent in-memory fallback is strictly forbidden in production.'
+      '[Storage Architecture] FATAL: Silent in-memory fallback is strictly forbidden in production. DATABASE_URL must be configured.'
     );
   }
 
@@ -124,12 +129,70 @@ export function getCreatorsRepository(): ICreatorsRepository {
 }
 
 export async function verifyDatabaseConnectivity(): Promise<void> {
+  const isProduction = process.env.NODE_ENV === 'production';
+
   // Ensure repositories are initialized
   getCreatorsRepository();
-  if (activeDatabaseAdapter && typeof activeDatabaseAdapter.testConnection === 'function') {
-    await activeDatabaseAdapter.testConnection();
-    console.log('[Storage Architecture] Database connectivity verified successfully.');
+
+  if (isProduction && (!activeDatabaseAdapter || !(activeDatabaseAdapter instanceof PostgresCreatorsRepository))) {
+    // If it's a mock with testConnection, allow it only if testConnection exists
+    if (!activeDatabaseAdapter || typeof (activeDatabaseAdapter as { testConnection?: unknown }).testConnection !== 'function') {
+      throw new Error(
+        '[Storage Architecture] FATAL: Persistent PostgreSQL adapter is mandatory in production. Silent in-memory fallback is strictly forbidden.'
+      );
+    }
   }
+
+  if (activeDatabaseAdapter && typeof activeDatabaseAdapter.testConnection === 'function') {
+    try {
+      await activeDatabaseAdapter.testConnection();
+      console.log('[Storage Architecture] Database connectivity verified successfully with PostgreSQL.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[Storage Architecture] Database connectivity test failed: ${message}`
+      );
+      if (isProduction) {
+        throw new Error(
+          `[Storage Architecture] FATAL: Unable to establish PostgreSQL connection in production (${message}). Server startup aborted.`
+        );
+      } else {
+        console.warn(
+          `[Storage Architecture] WARNING: Database connection failed in development (${message}). Operating with in-memory adapter.`
+        );
+        const memoryAdapter = new MemoryCreatorsRepository();
+        authRepoInstance = memoryAdapter;
+        creatorsRepoInstance = memoryAdapter;
+        activeDatabaseAdapter = memoryAdapter;
+      }
+    }
+  } else if (isProduction) {
+    throw new Error(
+      '[Storage Architecture] FATAL: Persistent PostgreSQL adapter is mandatory in production. In-memory adapter cannot be used.'
+    );
+  }
+}
+
+/**
+ * Test isolation helpers
+ */
+export function setActiveDatabaseAdapterForTesting(
+  adapter: PostgresCreatorsRepository | MemoryCreatorsRepository | null
+): void {
+  activeDatabaseAdapter = adapter;
+  if (adapter) {
+    authRepoInstance = adapter as unknown as IAuthRepository;
+    creatorsRepoInstance = adapter as unknown as ICreatorsRepository;
+  } else {
+    authRepoInstance = null;
+    creatorsRepoInstance = null;
+  }
+}
+
+export function resetRepositoriesForTesting(): void {
+  authRepoInstance = null;
+  creatorsRepoInstance = null;
+  activeDatabaseAdapter = null;
 }
 
 export async function closeDatabaseConnections(): Promise<void> {

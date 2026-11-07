@@ -32,15 +32,12 @@ authRouter.post('/register', async (req: Request, res: Response) => {
       return;
     }
 
-    // First user can be made ADMIN if none exist, or default to USER
-    const totalUsers = await authRepo.countUsers();
-    const role = totalUsers === 0 ? 'ADMIN' : 'USER';
-
+    // Public registration always assigns USER role. Admin is only created via bootstrapAdminFromEnv.
     const newUser = await authRepo.createUser({
       email,
       passwordHash: hashPassword(password),
       name,
-      role,
+      role: 'USER',
     });
 
     const token = createToken({

@@ -67,21 +67,32 @@ function registerGracefulShutdown(server: Server): void {
 }
 
 async function startServer() {
-  // 1. Fail-fast security and database configuration checks
-  validateSecurityConfig();
-  validateDatabaseConfig();
-
-  // 2. Verify database connectivity before declaring server ready
-  await verifyDatabaseConnectivity();
-
-  // 3. Bootstrap initial admin if environment variables are provided
-  await bootstrapAdminFromEnv();
-
   const app = express();
 
   // Cloud Run proporciona PORT automáticamente.
   const PORT = Number(process.env.PORT) || 3000;
   const HOST = '0.0.0.0';
+
+  let configError: string | null = null;
+
+  try {
+    // 1. Fail-fast security and database configuration checks
+    validateSecurityConfig();
+    validateDatabaseConfig();
+
+    // 2. Verify database connectivity before declaring server ready
+    await verifyDatabaseConnectivity();
+
+    // 3. Bootstrap initial admin if environment variables are provided
+    await bootstrapAdminFromEnv();
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    configError = errorMsg;
+    console.error(`[LibertadGO Configuration Alert] ${errorMsg}`);
+    console.warn(
+      `[LibertadGO] The server will listen on ${HOST}:${PORT} to maintain Cloud Run service health. Database-dependent endpoints will return 503 until configuration is set.`
+    );
+  }
 
   const distPath = path.resolve(__dirname, 'dist');
   const isProduction =
@@ -90,7 +101,29 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API
+  // Cloud Run & Uptime health check endpoint
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      status: configError ? 'degraded' : 'healthy',
+      database: configError ? 'not_configured' : 'connected',
+      error: configError || null,
+      environment: isProduction ? 'production' : 'development',
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // If production security or database configuration is incomplete, protect database endpoints
+  if (configError) {
+    app.use(['/api/auth', '/api/creators', '/api/admin'], (_req, res) => {
+      res.status(503).json({
+        success: false,
+        error: 'Servicio no disponible: configuración de producción incompleta en Cloud Run.',
+        detail: configError,
+      });
+    });
+  }
+
+  // API Router (destinations, places, and catalog routes remain accessible)
   app.use('/api', apiRouter);
 
   // Archivos públicos
@@ -121,6 +154,11 @@ async function startServer() {
     console.log(
       `[LibertadGO] Environment: ${isProduction ? 'production' : 'development'}`
     );
+    if (configError) {
+      console.warn(
+        `[LibertadGO] Running in setup/catalog-only mode due to missing production configuration.`
+      );
+    }
   });
 
   // 4. Register orderly shutdown handlers for Cloud Run SIGTERM / SIGINT

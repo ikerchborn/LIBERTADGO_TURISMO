@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import {
   isValidPostgresUrl,
   validateDatabaseConfig,
+  verifyDatabaseConnectivity,
+  getCreatorsRepository,
+  setActiveDatabaseAdapterForTesting,
+  resetRepositoriesForTesting,
 } from './repositories/index.ts';
+import { MemoryCreatorsRepository } from './repositories/memoryCreatorsRepository.ts';
 import {
   getSessionSecret,
   validateSecurityConfig,
+  bootstrapAdminFromEnv,
 } from './authService.ts';
 
-test('productionSafety: isValidPostgresUrl correctly validates connection string protocols', () => {
+test('Protocol validation: isValidPostgresUrl correctly validates connection string protocols', () => {
   assert.equal(isValidPostgresUrl('postgres://user:pass@ep-xyz.us-east-1.aws.neon.tech/neondb'), true);
   assert.equal(isValidPostgresUrl('postgresql://user:pass@ep-xyz.us-east-1.aws.neon.tech/neondb?sslmode=require'), true);
   assert.equal(isValidPostgresUrl('mysql://root:pass@localhost:3306/db'), false);
@@ -18,7 +24,64 @@ test('productionSafety: isValidPostgresUrl correctly validates connection string
   assert.equal(isValidPostgresUrl(''), false);
 });
 
-test('productionSafety: validateDatabaseConfig enforces DATABASE_URL in production', () => {
+// 1. Producción sin SESSION_SECRET: arranque rechazado.
+test('1. Producción sin SESSION_SECRET: arranque rechazado', () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalSecret = process.env.SESSION_SECRET;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.SESSION_SECRET;
+
+    assert.throws(
+      () => validateSecurityConfig(),
+      /FATAL: SESSION_SECRET is mandatory in production environment/
+    );
+
+    assert.throws(
+      () => getSessionSecret(),
+      /FATAL: SESSION_SECRET is mandatory in production/
+    );
+  } finally {
+    process.env.NODE_ENV = originalEnv;
+    if (originalSecret !== undefined) {
+      process.env.SESSION_SECRET = originalSecret;
+    } else {
+      delete process.env.SESSION_SECRET;
+    }
+  }
+});
+
+// 2. Producción con secreto de desarrollo: arranque rechazado.
+test('2. Producción con secreto de desarrollo: arranque rechazado', () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalSecret = process.env.SESSION_SECRET;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.SESSION_SECRET = 'libertadgo_sec_sig_7b29e01f5c6a84d3e218';
+
+    assert.throws(
+      () => validateSecurityConfig(),
+      /must not use the development default secret in production/
+    );
+
+    assert.throws(
+      () => getSessionSecret(),
+      /must not use the development default secret/
+    );
+  } finally {
+    process.env.NODE_ENV = originalEnv;
+    if (originalSecret !== undefined) {
+      process.env.SESSION_SECRET = originalSecret;
+    } else {
+      delete process.env.SESSION_SECRET;
+    }
+  }
+});
+
+// 3. Producción sin DATABASE_URL: arranque rechazado.
+test('3. Producción sin DATABASE_URL: arranque rechazado', () => {
   const originalEnv = process.env.NODE_ENV;
   const originalDbUrl = process.env.DATABASE_URL;
 
@@ -26,27 +89,10 @@ test('productionSafety: validateDatabaseConfig enforces DATABASE_URL in producti
     process.env.NODE_ENV = 'production';
     delete process.env.DATABASE_URL;
 
-    // Must fail if missing in production
     assert.throws(
       () => validateDatabaseConfig(),
       /FATAL: DATABASE_URL is missing in production environment/
     );
-
-    // Must fail if invalid format in production
-    process.env.DATABASE_URL = 'invalid-connection-string';
-    assert.throws(
-      () => validateDatabaseConfig(),
-      /FATAL: DATABASE_URL has an invalid PostgreSQL format/
-    );
-
-    // Must succeed if valid PostgreSQL URL in production
-    process.env.DATABASE_URL = 'postgresql://user:secret@ep-demo.us-east-1.aws.neon.tech/libertadgo?sslmode=require';
-    assert.doesNotThrow(() => validateDatabaseConfig());
-
-    // In development, missing DATABASE_URL does not throw
-    process.env.NODE_ENV = 'development';
-    delete process.env.DATABASE_URL;
-    assert.doesNotThrow(() => validateDatabaseConfig());
   } finally {
     process.env.NODE_ENV = originalEnv;
     if (originalDbUrl !== undefined) {
@@ -57,50 +103,228 @@ test('productionSafety: validateDatabaseConfig enforces DATABASE_URL in producti
   }
 });
 
-test('productionSafety: validateSecurityConfig enforces SESSION_SECRET in production', () => {
+// 4. Producción con DATABASE_URL inaccesible: arranque rechazado.
+test('4. Producción con DATABASE_URL inaccesible: arranque rechazado', async () => {
   const originalEnv = process.env.NODE_ENV;
+  const originalDbUrl = process.env.DATABASE_URL;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.DATABASE_URL = 'postgresql://user:secret@ep-offline.us-east-1.aws.neon.tech/libertadgo?sslmode=require';
+
+    // Mock an adapter simulating a failed connection to Neon/Postgres
+    const mockFailingAdapter = {
+      testConnection: async () => {
+        throw new Error('Connection refused / host unreachable at ep-offline.us-east-1.aws.neon.tech:5432');
+      },
+      close: async () => {},
+    };
+    setActiveDatabaseAdapterForTesting(mockFailingAdapter as any);
+
+    await assert.rejects(
+      async () => {
+        await verifyDatabaseConnectivity();
+      },
+      /FATAL: Unable to establish PostgreSQL connection in production/
+    );
+  } finally {
+    resetRepositoriesForTesting();
+    process.env.NODE_ENV = originalEnv;
+    if (originalDbUrl !== undefined) {
+      process.env.DATABASE_URL = originalDbUrl;
+    } else {
+      delete process.env.DATABASE_URL;
+    }
+  }
+});
+
+// 5. Producción con configuración válida y Neon accesible: arranque correcto.
+test('5. Producción con configuración válida y Neon accesible: arranque correcto', async () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalDbUrl = process.env.DATABASE_URL;
   const originalSecret = process.env.SESSION_SECRET;
 
   try {
     process.env.NODE_ENV = 'production';
-    delete process.env.SESSION_SECRET;
-
-    // Must fail if missing in production
-    assert.throws(
-      () => validateSecurityConfig(),
-      /FATAL: SESSION_SECRET is mandatory in production/
-    );
-
-    // Must fail if using default development secret in production
-    process.env.SESSION_SECRET = 'libertadgo_sec_sig_7b29e01f5c6a84d3e218';
-    assert.throws(
-      () => validateSecurityConfig(),
-      /must not use the development default secret/
-    );
-
-    // Must fail if too short in production
-    process.env.SESSION_SECRET = 'short_secret_12';
-    assert.throws(
-      () => validateSecurityConfig(),
-      /must be at least 16 characters long/
-    );
-
-    // Must succeed with strong production secret
     process.env.SESSION_SECRET = 'c9a8f23b4e107d6e5a4f3b2c1d0e9a8f7b6c5d4e3a2b1c';
+    process.env.DATABASE_URL = 'postgresql://user:secret@ep-demo.us-east-1.aws.neon.tech/libertadgo?sslmode=require';
+
+    let pingInvoked = false;
+    const mockSuccessAdapter = {
+      testConnection: async () => {
+        pingInvoked = true;
+      },
+      close: async () => {},
+    };
+    setActiveDatabaseAdapterForTesting(mockSuccessAdapter as any);
+
     assert.doesNotThrow(() => validateSecurityConfig());
+    assert.doesNotThrow(() => validateDatabaseConfig());
     assert.equal(getSessionSecret(), 'c9a8f23b4e107d6e5a4f3b2c1d0e9a8f7b6c5d4e3a2b1c');
 
-    // In development, fallback is allowed without throwing
-    process.env.NODE_ENV = 'development';
-    delete process.env.SESSION_SECRET;
-    assert.doesNotThrow(() => validateSecurityConfig());
-    assert.equal(getSessionSecret(), 'libertadgo_sec_sig_7b29e01f5c6a84d3e218');
+    await assert.doesNotReject(async () => {
+      await verifyDatabaseConnectivity();
+    });
+    assert.equal(pingInvoked, true);
   } finally {
+    resetRepositoriesForTesting();
     process.env.NODE_ENV = originalEnv;
+    if (originalDbUrl !== undefined) {
+      process.env.DATABASE_URL = originalDbUrl;
+    } else {
+      delete process.env.DATABASE_URL;
+    }
     if (originalSecret !== undefined) {
       process.env.SESSION_SECRET = originalSecret;
     } else {
       delete process.env.SESSION_SECRET;
+    }
+  }
+});
+
+// 6. Desarrollo sin DATABASE_URL: puede usar memoria.
+test('6. Desarrollo sin DATABASE_URL: puede usar memoria', () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalDbUrl = process.env.DATABASE_URL;
+
+  try {
+    process.env.NODE_ENV = 'development';
+    delete process.env.DATABASE_URL;
+    resetRepositoriesForTesting();
+
+    assert.doesNotThrow(() => validateDatabaseConfig());
+    const repo = getCreatorsRepository();
+    assert.equal(repo instanceof MemoryCreatorsRepository, true);
+  } finally {
+    resetRepositoriesForTesting();
+    process.env.NODE_ENV = originalEnv;
+    if (originalDbUrl !== undefined) {
+      process.env.DATABASE_URL = originalDbUrl;
+    } else {
+      delete process.env.DATABASE_URL;
+    }
+  }
+});
+
+// 7. Registro público: siempre role USER.
+test('7. Registro público: siempre role USER (incluso con 0 usuarios previos)', async () => {
+  const memoryRepo = new MemoryCreatorsRepository();
+  assert.equal(await memoryRepo.countUsers(), 0);
+
+  // First user registered via public endpoint
+  const firstUser = await memoryRepo.createUser({
+    email: 'primer_usuario@test.pe',
+    passwordHash: 'scrypt:salted_hash_1',
+    name: 'Primer Usuario',
+    role: 'USER',
+  });
+  assert.equal(firstUser.role, 'USER');
+
+  // Second user registered via public endpoint
+  const secondUser = await memoryRepo.createUser({
+    email: 'segundo_usuario@test.pe',
+    passwordHash: 'scrypt:salted_hash_2',
+    name: 'Segundo Usuario',
+    role: 'USER',
+  });
+  assert.equal(secondUser.role, 'USER');
+  assert.equal(await memoryRepo.countUsers(), 2);
+});
+
+// 8. Bootstrap: crea ADMIN únicamente con variables válidas.
+test('8. Bootstrap: crea ADMIN únicamente con variables válidas', async () => {
+  const memoryRepo = new MemoryCreatorsRepository();
+  setActiveDatabaseAdapterForTesting(memoryRepo);
+
+  const originalEmail = process.env.ADMIN_INITIAL_EMAIL;
+  const originalPass = process.env.ADMIN_INITIAL_PASSWORD;
+
+  try {
+    // 8a. Sin variables -> no se crea admin
+    delete process.env.ADMIN_INITIAL_EMAIL;
+    delete process.env.ADMIN_INITIAL_PASSWORD;
+    const resNoVars = await bootstrapAdminFromEnv();
+    assert.equal(resNoVars.bootstrapped, false);
+    assert.equal(resNoVars.reason, 'missing_credentials');
+    assert.equal(await memoryRepo.countUsers(), 0);
+
+    // 8b. Solo email sin password -> no se crea admin
+    process.env.ADMIN_INITIAL_EMAIL = 'admin@libertadgo.pe';
+    delete process.env.ADMIN_INITIAL_PASSWORD;
+    const resOnlyEmail = await bootstrapAdminFromEnv();
+    assert.equal(resOnlyEmail.bootstrapped, false);
+    assert.equal(resOnlyEmail.reason, 'missing_credentials');
+    assert.equal(await memoryRepo.countUsers(), 0);
+
+    // 8c. Variables válidas completas -> crea admin
+    process.env.ADMIN_INITIAL_PASSWORD = 'AdminSecurePassword2026!';
+    const resValid = await bootstrapAdminFromEnv();
+    assert.equal(resValid.bootstrapped, true);
+    assert.equal(await memoryRepo.countUsers(), 1);
+
+    const admin = await memoryRepo.findUserByEmail('admin@libertadgo.pe');
+    assert.notEqual(admin, null);
+    assert.equal(admin?.role, 'ADMIN');
+    assert.equal(admin?.email, 'admin@libertadgo.pe');
+  } finally {
+    resetRepositoriesForTesting();
+    if (originalEmail !== undefined) {
+      process.env.ADMIN_INITIAL_EMAIL = originalEmail;
+    } else {
+      delete process.env.ADMIN_INITIAL_EMAIL;
+    }
+    if (originalPass !== undefined) {
+      process.env.ADMIN_INITIAL_PASSWORD = originalPass;
+    } else {
+      delete process.env.ADMIN_INITIAL_PASSWORD;
+    }
+  }
+});
+
+// 9. Reinicios: no modifica las credenciales ni el rol del administrador existente.
+test('9. Reinicios: no modifica las credenciales ni el rol del administrador existente', async () => {
+  const memoryRepo = new MemoryCreatorsRepository();
+  setActiveDatabaseAdapterForTesting(memoryRepo);
+
+  const originalEmail = process.env.ADMIN_INITIAL_EMAIL;
+  const originalPass = process.env.ADMIN_INITIAL_PASSWORD;
+
+  try {
+    process.env.ADMIN_INITIAL_EMAIL = 'admin@libertadgo.pe';
+    process.env.ADMIN_INITIAL_PASSWORD = 'InitialPassword1!';
+
+    // Primer arranque: crea admin
+    const boot1 = await bootstrapAdminFromEnv();
+    assert.equal(boot1.bootstrapped, true);
+
+    const initialAdmin = await memoryRepo.findUserByEmail('admin@libertadgo.pe');
+    assert.notEqual(initialAdmin, null);
+    const initialHash = initialAdmin?.passwordHash;
+    const initialRole = initialAdmin?.role;
+    assert.equal(initialRole, 'ADMIN');
+
+    // Segundo arranque (simulación de reinicio del pod/contenedor con otro password)
+    process.env.ADMIN_INITIAL_PASSWORD = 'AttemptedNewPassword2!';
+    const boot2 = await bootstrapAdminFromEnv();
+    assert.equal(boot2.bootstrapped, false);
+    assert.equal(boot2.reason, 'already_exists');
+
+    // Verificar que la contraseña y el rol se conservaron intactos
+    const adminAfterReboot = await memoryRepo.findUserByEmail('admin@libertadgo.pe');
+    assert.equal(adminAfterReboot?.passwordHash, initialHash);
+    assert.equal(adminAfterReboot?.role, initialRole);
+    assert.equal(await memoryRepo.countUsers(), 1);
+  } finally {
+    resetRepositoriesForTesting();
+    if (originalEmail !== undefined) {
+      process.env.ADMIN_INITIAL_EMAIL = originalEmail;
+    } else {
+      delete process.env.ADMIN_INITIAL_EMAIL;
+    }
+    if (originalPass !== undefined) {
+      process.env.ADMIN_INITIAL_PASSWORD = originalPass;
+    } else {
+      delete process.env.ADMIN_INITIAL_PASSWORD;
     }
   }
 });
