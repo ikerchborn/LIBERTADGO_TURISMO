@@ -156,7 +156,7 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
         VISTA ESCRITORIO (≥ md):
         Barra lateral vertical fija SaaS
       */}
-      <aside className="hidden md:flex w-52 h-full bg-white border-r border-[#E9EEF4] flex-col py-3 select-none shrink-0 overflow-y-auto">
+      <aside className="hidden md:flex w-52 h-full min-h-0 bg-white border-r border-[#E9EEF4] flex-col py-3 select-none shrink-0 overflow-y-auto">
         <div className="px-3 space-y-0.5">
           <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider px-2 block mb-1">
             Navegación

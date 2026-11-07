@@ -126,3 +126,49 @@ export interface TripItinerary {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CampaignPrize {
+  position: 1 | 2 | 3;
+  title: string;
+  badge: string;
+  cashPEN: number;
+  perks: string[];
+}
+
+export interface CampaignSubmission {
+  id: string;
+  campaignId: string;
+  creatorName: string;
+  creatorHandle: string;
+  platform: 'tiktok' | 'reels' | 'shorts';
+  videoUrl: string;
+  title: string;
+  caption: string;
+  thumbnailUrl: string;
+  votesCount: number;
+  viewsCount: number;
+  submittedAt: string;
+  status: 'pending' | 'approved' | 'featured';
+}
+
+export interface LocalCampaign {
+  id: string;
+  title: string;
+  businessName: string;
+  placeId: string;
+  localityId: string;
+  startDate: string;
+  endDate: string;
+  description: string;
+  videoBrief: string;
+  requirements: string[];
+  hashtags: string[];
+  prizes: {
+    first: CampaignPrize;
+    second: CampaignPrize;
+    third: CampaignPrize;
+  };
+  submissions: CampaignSubmission[];
+  status: 'active' | 'judging' | 'completed';
+  createdAt: string;
+}

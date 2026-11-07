@@ -1,9 +1,13 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+
+maplibregl.setWorkerUrl(workerUrl);
 import { Place, TripItinerary } from '../../types/catalog.ts';
 import { Locality } from '../../types/geo.ts';
 import { getLocality } from '../../utils/geoBoundary.ts';
-import { RotateCcw, Plus, Trash2, Star, Layers, Navigation } from 'lucide-react';
+import { RotateCcw, Plus, Trash2, Star, Layers, Navigation, ChevronRight, ChevronLeft, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface MapPanelProps {
   trip: TripItinerary;
@@ -12,6 +16,8 @@ interface MapPanelProps {
   onSelectPlace: (place: Place) => void;
   onAddPlaceToDay?: (place: Place, dayNumber: number) => void;
   onRemoveActivity?: (activityId: string) => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 // Category color map for visual differentiation
@@ -32,17 +38,15 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   onSelectPlace,
   onAddPlaceToDay,
   onRemoveActivity,
+  isCollapsed = false,
+  onToggleCollapse,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
-  const popupRef = useRef<maplibregl.Popup | null>(null);
   const [mapLoaded, setMapLoaded] = useState<boolean>(false);
+  const [mapError, setMapError] = useState<string | null>(null);
   const [showRoutes, setShowRoutes] = useState<boolean>(true);
-
-  if (typeof window !== 'undefined' && maplibregl.config) {
-    maplibregl.config.WORKER_URL = '/maplibre-gl-worker.mjs';
-  }
 
   const destinationLocality: Locality | undefined = getLocality(trip.destinationId);
   const centerLat = destinationLocality?.coordinates.lat || -8.1118;
@@ -50,8 +54,19 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const initialZoom = destinationLocality?.defaultZoom || 14;
 
   // Initialize MapLibre GL JS
-  useEffect(() => {
+  const initMap = useCallback(() => {
     if (!mapContainerRef.current) return;
+
+    // Clean up previous instance if any
+    if (mapInstanceRef.current) {
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
+
+    setMapError(null);
+    setMapLoaded(false);
 
     try {
       const map = new maplibregl.Map({
@@ -61,7 +76,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           sources: {
             'osm-tiles': {
               type: 'raster',
-              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tiles: [
+                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              ],
               tileSize: 256,
               attribution:
                 '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> | LibertadGO',
@@ -83,6 +102,16 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
       map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
 
+      map.on('error', (e) => {
+        // Individual tile loading errors (like high zoom 404s) shouldn't break the entire canvas
+        if (e && e.error) {
+          const err = e.error as { status?: number; message?: string };
+          if (err.status === 403) {
+            console.warn('[MapLibre] Tile access warning:', err.message);
+          }
+        }
+      });
+
       map.on('load', () => {
         if (!map.getSource('itinerary-route')) {
           map.addSource('itinerary-route', {
@@ -93,7 +122,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             },
           });
 
-          // Route casing (white line)
+          // Route casing (white shadow line)
           map.addLayer({
             id: 'itinerary-route-casing',
             type: 'line',
@@ -129,17 +158,51 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       });
 
       mapInstanceRef.current = map;
-
-      return () => {
-        if (popupRef.current) popupRef.current.remove();
-        markersRef.current.forEach((m) => m.remove());
-        markersRef.current = [];
-        map.remove();
-      };
-    } catch (e) {
-      console.warn('MapLibre GL failed to initialize:', e);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido al inicializar el mapa';
+      console.error('[MapLibre] Error de inicialización:', msg);
+      setMapError(msg);
     }
   }, [centerLat, centerLng, initialZoom]);
+
+  useEffect(() => {
+    initMap();
+    return () => {
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, [initMap]);
+
+  // ResizeObserver to automatically resize map whenever container dimensions change
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    const ro = new ResizeObserver(() => {
+      if (mapInstanceRef.current && mapLoaded) {
+        mapInstanceRef.current.resize();
+      }
+    });
+
+    ro.observe(mapContainerRef.current);
+    return () => ro.disconnect();
+  }, [mapLoaded]);
+
+  // Re-trigger resize when collapse state changes
+  useEffect(() => {
+    if (!isCollapsed && mapInstanceRef.current) {
+      requestAnimationFrame(() => {
+        mapInstanceRef.current?.resize();
+      });
+      const timer = setTimeout(() => {
+        mapInstanceRef.current?.resize();
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [isCollapsed]);
 
   // Recalculate Route Geometry
   useEffect(() => {
@@ -319,10 +382,53 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   }, [selectedPlace, trip.activities]);
 
   return (
-    <div className="relative flex-1 h-full min-h-[360px] bg-[#F7F8FA] overflow-hidden flex flex-col select-none">
-      <div ref={mapContainerRef} className="w-full h-full relative" />
+    <div className="relative w-full h-full min-h-0 overflow-hidden flex select-none">
+      {/* Barra de Mapa Contraído (visible en Desktop cuando isCollapsed es true) */}
+      {isCollapsed && (
+        <div className="hidden lg:flex flex-col items-center justify-between py-4 px-2 w-12 bg-white border-l border-[#E9EEF4] h-full shrink-0 select-none">
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="p-2 hover:bg-[#F7F8FA] text-[#17243A] rounded-xl border border-[#E9EEF4] transition-colors cursor-pointer"
+            title="Expandir mapa"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <div className="[writing-mode:vertical-rl] text-xs font-semibold text-[#64748B] tracking-wider uppercase rotate-180">
+            Mapa de {trip.destinationName}
+          </div>
+          <div className="w-2 h-2 rounded-full bg-[#E85B49]" />
+        </div>
+      )}
 
-      {/* Insignia de localidad y botón de ruta */}
+      {/* Contenedor Cartográfico Persistente (se mantiene montado en el DOM para evitar destruir la instancia) */}
+      <div
+        className={`relative flex-1 h-full min-h-0 bg-[#E9EEF4]/30 overflow-hidden ${
+          isCollapsed ? 'hidden' : 'flex flex-col'
+        }`}
+      >
+        <div ref={mapContainerRef} className="w-full h-full relative" />
+
+      {/* Error Banner si MapLibre no pudo renderizar */}
+      {mapError && (
+        <div className="absolute top-14 left-3 right-3 sm:right-auto sm:max-w-md z-30 bg-rose-50 border border-rose-200 rounded-xl p-3 shadow-md flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-rose-900 flex-1">
+            <span className="font-bold block">Error al cargar cartografía:</span>
+            <span>{mapError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={initMap}
+            className="p-1 text-rose-700 hover:bg-rose-100 rounded-lg cursor-pointer transition-colors"
+            title="Reintentar"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Insignia de localidad, botón de ruta y botón de contraer */}
       <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
         <div className="bg-white/95 backdrop-blur-xs border border-[#E9EEF4] rounded-xl px-3 py-1.5 shadow-xs flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-[#E85B49]" />
@@ -345,6 +451,18 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           <Navigation className={`w-3.5 h-3.5 ${showRoutes ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
           <span className="hidden sm:inline">{showRoutes ? 'Ruta activa' : 'Ruta'}</span>
         </button>
+
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 bg-white/95 backdrop-blur-xs border border-[#E9EEF4] rounded-xl text-xs font-medium text-[#17243A] shadow-xs hover:bg-white transition-colors cursor-pointer"
+            title="Contraer mapa para ampliar lista"
+          >
+            <span>Contraer</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Tarjeta flotante inferior al tocar marcador */}
@@ -440,5 +558,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         </button>
       </div>
     </div>
+  </div>
   );
 };

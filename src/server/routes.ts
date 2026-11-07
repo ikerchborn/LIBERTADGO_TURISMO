@@ -27,17 +27,27 @@ apiRouter.get('/destinations/:id', (req: Request, res: Response) => {
 
 // GET /api/places
 apiRouter.get('/places', (req: Request, res: Response) => {
-  const { localityId, category } = req.query;
+  const { localityId, category, q, page, limit } = req.query;
   const places = catalogRepository.getPlaces({
     localityId: typeof localityId === 'string' ? localityId : undefined,
     category: typeof category === 'string' ? category : undefined,
+    search: typeof q === 'string' ? q : undefined,
   });
+
+  const pageNum = Math.max(1, Number(page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
+  const total = places.length;
+  const startIndex = (pageNum - 1) * pageSize;
+  const paginated = limit ? places.slice(startIndex, startIndex + pageSize) : places;
 
   res.json({
     success: true,
-    data: places,
-    total: places.length,
+    data: paginated,
+    total,
+    page: pageNum,
+    totalPages: Math.ceil(total / pageSize),
     regionConstraint: 'La Libertad',
+    sources: ['MINCETUR', 'OpenStreetMap', 'Directorio_Oficial_La_Libertad'],
   });
 });
 
@@ -131,3 +141,165 @@ apiRouter.delete('/itineraries/:id/activities/:activityId', (req: Request, res: 
   }
   res.json({ success: true, message: 'Actividad eliminada' });
 });
+
+// =========================================================================
+// PAQUETE PARA LOCALES & CREADORES: CAMPAÑAS Y CONCURSO DE VIDEOS (TOP 3)
+// =========================================================================
+
+// GET /api/campaigns
+apiRouter.get('/campaigns', (req: Request, res: Response) => {
+  const { localityId, q, startDate, endDate } = req.query;
+  const campaigns = catalogRepository.getCampaigns({
+    localityId: typeof localityId === 'string' ? localityId : undefined,
+    search: typeof q === 'string' ? q : undefined,
+    startDate: typeof startDate === 'string' ? startDate : undefined,
+    endDate: typeof endDate === 'string' ? endDate : undefined,
+  });
+
+  res.json({
+    success: true,
+    data: campaigns,
+    total: campaigns.length,
+    region: 'La Libertad, Perú',
+    prizesAwardedTo: 'Top 3 Puestos (Oro, Plata, Bronce)',
+  });
+});
+
+// GET /api/campaigns/:id
+apiRouter.get('/campaigns/:id', (req: Request, res: Response) => {
+  const campaign = catalogRepository.getCampaignById(req.params.id);
+  if (!campaign) {
+    res.status(404).json({ success: false, error: 'Campaña no encontrada' });
+    return;
+  }
+  res.json({ success: true, data: campaign });
+});
+
+// POST /api/campaigns
+apiRouter.post('/campaigns', (req: Request, res: Response) => {
+  const { title, businessName, placeId, localityId, startDate, endDate, description, videoBrief, requirements, hashtags, prizes } = req.body;
+
+  if (!title || !businessName || !startDate || !endDate) {
+    res.status(400).json({ success: false, error: 'Título, nombre del local y fechas son requeridos' });
+    return;
+  }
+
+  const defaultPrizes = prizes || {
+    first: {
+      position: 1,
+      title: '1º Puesto — Oro',
+      badge: '🥇 Ganador Absoluto',
+      cashPEN: 1500,
+      perks: ['S/ 1,500 en efectivo directo', 'Trofeo Oficial de Oro LibertadGO', 'Difusión destacada'],
+    },
+    second: {
+      position: 2,
+      title: '2º Puesto — Plata',
+      badge: '🥈 Segundo Lugar',
+      cashPEN: 800,
+      perks: ['S/ 800 en efectivo', 'Experiencia gastronómica para 2 en el local', 'Certificado oficial'],
+    },
+    third: {
+      position: 3,
+      title: '3º Puesto — Bronce',
+      badge: '🥉 Tercer Lugar',
+      cashPEN: 400,
+      perks: ['S/ 400 en efectivo', 'Canasta con productos regionales de La Libertad'],
+    },
+  };
+
+  const newCampaign = catalogRepository.createCampaign({
+    title,
+    businessName,
+    placeId: placeId || 'place_custom',
+    localityId: localityId || 'trujillo',
+    startDate,
+    endDate,
+    description: description || 'Campaña de video para creadores de contenido.',
+    videoBrief: videoBrief || 'Video vertical de 30 a 60 segundos sobre la experiencia en nuestro local.',
+    requirements: Array.isArray(requirements) ? requirements : ['Video vertical 9:16', 'Mención del local y #LibertadGO'],
+    hashtags: Array.isArray(hashtags) ? hashtags : ['#LibertadGO', '#TurismoLaLibertad'],
+    prizes: defaultPrizes,
+    status: 'active',
+  });
+
+  res.status(201).json({ success: true, data: newCampaign });
+});
+
+// POST /api/campaigns/:id/submissions
+apiRouter.post('/campaigns/:id/submissions', (req: Request, res: Response) => {
+  const { creatorName, creatorHandle, platform, videoUrl, title, caption, thumbnailUrl } = req.body;
+
+  if (!creatorName || !videoUrl || !title) {
+    res.status(400).json({ success: false, error: 'Nombre del creador, enlace del video y título son obligatorios' });
+    return;
+  }
+
+  const result = catalogRepository.addSubmission(req.params.id, {
+    creatorName,
+    creatorHandle: creatorHandle || '@creador',
+    platform: platform || 'tiktok',
+    videoUrl,
+    title,
+    caption: caption || '',
+    thumbnailUrl: thumbnailUrl || 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=600&q=80',
+  });
+
+  if (result.error || !result.submission) {
+    res.status(400).json({ success: false, error: result.error });
+    return;
+  }
+
+  res.status(201).json({ success: true, data: result.submission });
+});
+
+// POST /api/campaigns/:id/submissions/:subId/vote
+apiRouter.post('/campaigns/:id/submissions/:subId/vote', (req: Request, res: Response) => {
+  const result = catalogRepository.voteSubmission(req.params.id, req.params.subId);
+  if (!result.success) {
+    res.status(400).json({ success: false, error: result.error });
+    return;
+  }
+  res.json({ success: true, newVotes: result.newVotes });
+});
+
+// =========================================================================
+// ASISTENTE DE IA LIBERTADGO — 10 MENSAJES GRATIS CON GEMINI 3.8 FLASH
+// =========================================================================
+
+// POST /api/ai/chat
+apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
+  try {
+    const { message, context, remainingCredits } = req.body;
+
+    if (!message || typeof message !== 'string') {
+      res.status(400).json({ success: false, error: 'Mensaje requerido' });
+      return;
+    }
+
+    // Dynamic import to avoid cold start issues
+    const { generateAiResponse } = await import('./geminiService.ts');
+    const result = await generateAiResponse({
+      prompt: message,
+      context,
+    });
+
+    const creditsLeft = typeof remainingCredits === 'number' ? Math.max(0, remainingCredits - 1) : 9;
+
+    res.json({
+      success: true,
+      reply: result.reply,
+      modelUsed: result.modelUsed,
+      source: result.source,
+      creditsRemaining: creditsLeft,
+      freeCreditsCap: 10,
+    });
+  } catch (error) {
+    console.error('[API /api/ai/chat Error]', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al procesar consulta con el asistente de IA.',
+    });
+  }
+});
+

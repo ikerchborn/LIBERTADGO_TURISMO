@@ -1,5 +1,6 @@
 import { INITIAL_PLACES } from '../data/initialPlaces.ts';
-import { Place, TripItinerary, TripActivity } from '../types/catalog.ts';
+import { INITIAL_CAMPAIGNS } from '../data/initialCampaigns.ts';
+import { Place, TripItinerary, TripActivity, LocalCampaign, CampaignSubmission } from '../types/catalog.ts';
 import { LA_LIBERTAD_LOCALITIES, Locality } from '../types/geo.ts';
 import { isWithinLaLibertad, validateLocalityId, getLocality } from '../utils/geoBoundary.ts';
 import { calculateTripDuration, formatDateRange } from '../utils/dateUtils.ts';
@@ -7,6 +8,7 @@ import { calculateTripDuration, formatDateRange } from '../utils/dateUtils.ts';
 class CatalogRepository {
   private places: Map<string, Place> = new Map();
   private itineraries: Map<string, TripItinerary> = new Map();
+  private campaigns: Map<string, LocalCampaign> = new Map();
 
   constructor() {
     // Populate verified places catalog
@@ -14,6 +16,11 @@ class CatalogRepository {
       if (isWithinLaLibertad(place.coordinates)) {
         this.places.set(place.id, place);
       }
+    }
+
+    // Populate initial creator campaigns for local businesses
+    for (const campaign of INITIAL_CAMPAIGNS) {
+      this.campaigns.set(campaign.id, campaign);
     }
   }
 
@@ -27,21 +34,47 @@ class CatalogRepository {
   }
 
   // --- PLACES & CATALOG ---
-  public getPlaces(filters?: { localityId?: string; category?: string }): Place[] {
+  public getPlaces(filters?: { localityId?: string; category?: string; search?: string }): Place[] {
     let result = Array.from(this.places.values());
 
     if (filters?.localityId) {
-      const locId = filters.localityId.toLowerCase();
+      const locId = filters.localityId.toLowerCase().trim();
       result = result.filter((p) => p.localityId.toLowerCase() === locId);
     }
 
-    if (filters?.category) {
-      const cat = filters.category.toLowerCase();
-      result = result.filter((p) => p.category.toLowerCase() === cat);
+    if (filters?.category && filters.category !== 'todas') {
+      const cat = filters.category.toLowerCase().trim();
+      result = result.filter(
+        (p) =>
+          p.category.toLowerCase() === cat ||
+          (p.subcategory && p.subcategory.toLowerCase().includes(cat))
+      );
+    }
+
+    if (filters?.search) {
+      const q = filters.search.toLowerCase().trim();
+      result = result.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.address.toLowerCase().includes(q) ||
+          p.shortDescription.toLowerCase().includes(q) ||
+          p.tags.some((t) => t.toLowerCase().includes(q))
+      );
+    }
+
+    // Strict deduplication by ID and slug
+    const seen = new Set<string>();
+    const deduped: Place[] = [];
+    for (const p of result) {
+      if (!seen.has(p.id) && !seen.has(p.slug)) {
+        seen.add(p.id);
+        seen.add(p.slug);
+        deduped.push(p);
+      }
     }
 
     // Double check strict boundary constraint
-    return result.filter((p) => isWithinLaLibertad(p.coordinates));
+    return deduped.filter((p) => isWithinLaLibertad(p.coordinates));
   }
 
   public getPlaceById(id: string): Place | undefined {
@@ -55,7 +88,7 @@ class CatalogRepository {
     let result = Array.from(this.places.values());
 
     if (localityId) {
-      result = result.filter((p) => p.localityId.toLowerCase() === localityId.toLowerCase());
+      result = result.filter((p) => p.localityId.toLowerCase() === localityId.toLowerCase().trim());
     }
 
     if (q) {
@@ -70,7 +103,18 @@ class CatalogRepository {
       });
     }
 
-    return result.filter((p) => isWithinLaLibertad(p.coordinates));
+    // Deduplicate
+    const seen = new Set<string>();
+    const deduped: Place[] = [];
+    for (const p of result) {
+      if (!seen.has(p.id) && !seen.has(p.slug)) {
+        seen.add(p.id);
+        seen.add(p.slug);
+        deduped.push(p);
+      }
+    }
+
+    return deduped.filter((p) => isWithinLaLibertad(p.coordinates));
   }
 
   // --- ITINERARIES ---
@@ -170,6 +214,105 @@ class CatalogRepository {
     itinerary.activities.splice(index, 1);
     itinerary.updatedAt = new Date().toISOString();
     return true;
+  }
+
+  // --- LOCAL BUSINESS CAMPAIGNS WITH CREATORS ---
+  public getCampaigns(filters?: {
+    localityId?: string;
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+  }): LocalCampaign[] {
+    let result = Array.from(this.campaigns.values());
+
+    if (filters?.localityId && filters.localityId !== 'todas') {
+      const locId = filters.localityId.toLowerCase().trim();
+      result = result.filter((c) => c.localityId.toLowerCase() === locId);
+    }
+
+    if (filters?.search) {
+      const q = filters.search.toLowerCase().trim();
+      result = result.filter(
+        (c) =>
+          c.title.toLowerCase().includes(q) ||
+          c.businessName.toLowerCase().includes(q) ||
+          c.description.toLowerCase().includes(q) ||
+          c.hashtags.some((h) => h.toLowerCase().includes(q))
+      );
+    }
+
+    if (filters?.startDate) {
+      result = result.filter((c) => c.endDate >= (filters.startDate as string));
+    }
+
+    if (filters?.endDate) {
+      result = result.filter((c) => c.startDate <= (filters.endDate as string));
+    }
+
+    // Sort submissions by votes count descending for automatic leaderboard ranking
+    return result.map((c) => ({
+      ...c,
+      submissions: [...c.submissions].sort((a, b) => b.votesCount - a.votesCount),
+    }));
+  }
+
+  public getCampaignById(id: string): LocalCampaign | undefined {
+    const c = this.campaigns.get(id);
+    if (!c) return undefined;
+    return {
+      ...c,
+      submissions: [...c.submissions].sort((a, b) => b.votesCount - a.votesCount),
+    };
+  }
+
+  public createCampaign(data: Omit<LocalCampaign, 'id' | 'createdAt' | 'submissions'>): LocalCampaign {
+    const id = `camp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newCampaign: LocalCampaign = {
+      ...data,
+      id,
+      submissions: [],
+      status: 'active',
+      createdAt: new Date().toISOString(),
+    };
+    this.campaigns.set(id, newCampaign);
+    return newCampaign;
+  }
+
+  public addSubmission(
+    campaignId: string,
+    submissionData: Omit<CampaignSubmission, 'id' | 'submittedAt' | 'votesCount' | 'viewsCount' | 'status'>
+  ): { submission?: CampaignSubmission; error?: string } {
+    const campaign = this.campaigns.get(campaignId);
+    if (!campaign) {
+      return { error: 'Campaña no encontrada' };
+    }
+
+    const id = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newSubmission: CampaignSubmission = {
+      ...submissionData,
+      id,
+      campaignId,
+      votesCount: 1, // initial vote from author
+      viewsCount: Math.floor(Math.random() * 500) + 100,
+      submittedAt: new Date().toISOString(),
+      status: 'approved',
+    };
+
+    campaign.submissions.push(newSubmission);
+    return { submission: newSubmission };
+  }
+
+  public voteSubmission(campaignId: string, submissionId: string): { success: boolean; newVotes?: number; error?: string } {
+    const campaign = this.campaigns.get(campaignId);
+    if (!campaign) return { success: false, error: 'Campaña no encontrada' };
+
+    const submission = campaign.submissions.find((s) => s.id === submissionId);
+    if (!submission) return { success: false, error: 'Envío de video no encontrado' };
+
+    submission.votesCount += 1;
+    submission.viewsCount += Math.floor(Math.random() * 20) + 5;
+
+    return { success: true, newVotes: submission.votesCount };
   }
 }
 

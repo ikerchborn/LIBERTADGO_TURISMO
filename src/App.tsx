@@ -9,7 +9,6 @@ import { TripCreationScreen } from './components/TripCreationScreen.tsx';
 import { CreateTripModal } from './components/CreateTripModal.tsx';
 import { ArchitectureModal } from './components/ArchitectureModal.tsx';
 import { DestinationsGallery } from './components/DestinationsGallery.tsx';
-import { WorkspaceNavbar } from './components/workspace/WorkspaceNavbar.tsx';
 import { WorkspaceSidebar, WorkspaceSection } from './components/workspace/WorkspaceSidebar.tsx';
 import { WorkspaceContent } from './components/workspace/WorkspaceContent.tsx';
 import { MapPanel } from './components/workspace/MapPanel.tsx';
@@ -27,9 +26,10 @@ export default function App() {
   const [modalTargetDestinationId, setModalTargetDestinationId] = useState<string>('trujillo');
 
   // Wanderlog Workspace State
-  const [activeSection, setActiveSection] = useState<WorkspaceSection>('itinerary');
+  const [activeSection, setActiveSection] = useState<WorkspaceSection>('overview');
   const [selectedDayNumber, setSelectedDayNumber] = useState<number | null>(null);
   const [mobileTab, setMobileTab] = useState<'content' | 'map'>('content');
+  const [isMapCollapsed, setIsMapCollapsed] = useState<boolean>(false);
 
   // Places catalog state
   const [places, setPlaces] = useState<Place[]>(INITIAL_PLACES);
@@ -116,15 +116,19 @@ export default function App() {
       return [newTrip, ...filtered];
     });
     setActiveView('workspace');
-    setActiveSection('itinerary');
+    setActiveSection('overview');
     setSelectedPlace(null);
+    setSelectedDayNumber(null);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   };
 
   const handleSelectSavedTrip = (trip: TripItinerary) => {
     setCurrentTrip(trip);
     setActiveView('workspace');
-    setActiveSection('itinerary');
+    setActiveSection('overview');
     setSelectedPlace(null);
+    setSelectedDayNumber(null);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   };
 
   const handleUpdateTripTitle = (newTitle: string) => {
@@ -320,51 +324,50 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F7F8FA] text-[#17243A] antialiased">
+    <div className="h-dvh flex flex-col overflow-hidden bg-[#F8F9FA] text-[#17243A] antialiased">
       {/* 
         Single Unified Header Bar:
-        - When in workspace with an active trip: WorkspaceNavbar
-        - When no trip or in destinations gallery: Header
+        Always visible, fixed height (h-14 shrink-0), consistent across all views.
       */}
-      {currentTrip && activeView === 'workspace' ? (
-        <WorkspaceNavbar
-          trip={currentTrip}
-          onEditTrip={() => {
+      <Header
+        currentTrip={currentTrip}
+        activeView={activeView}
+        setActiveView={(view) => {
+          setActiveView(view);
+          if (view === 'workspace') {
+            setActiveSection('overview');
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+          }
+        }}
+        onOpenCreateModal={() => {
+          setModalTargetDestinationId('trujillo');
+          setIsCreateModalOpen(true);
+        }}
+        onEditTrip={() => {
+          if (currentTrip) {
             setModalTargetDestinationId(currentTrip.destinationId);
             setIsCreateModalOpen(true);
-          }}
-          onNewTrip={() => {
-            setModalTargetDestinationId(currentTrip.destinationId);
-            setIsCreateModalOpen(true);
-          }}
-          onUpdateTripTitle={handleUpdateTripTitle}
-          onOpenArchitectureModal={() => setIsArchitectureModalOpen(true)}
-          onOpenDestinations={() => setActiveView('destinations')}
-          mobileTab={mobileTab}
-          setMobileTab={setMobileTab}
-        />
-      ) : (
-        <Header
-          currentTrip={currentTrip}
-          onOpenCreateModal={() => {
-            setModalTargetDestinationId(currentTrip?.destinationId || 'trujillo');
-            setIsCreateModalOpen(true);
-          }}
-          onOpenArchitectureModal={() => setIsArchitectureModalOpen(true)}
-          activeView={activeView}
-          setActiveView={setActiveView}
-        />
-      )}
+          }
+        }}
+        onUpdateTripTitle={handleUpdateTripTitle}
+        onOpenArchitectureModal={() => setIsArchitectureModalOpen(true)}
+        mobileTab={mobileTab}
+        setMobileTab={setMobileTab}
+        isMapCollapsed={isMapCollapsed}
+        onToggleMapCollapse={() => setIsMapCollapsed((prev) => !prev)}
+      />
 
-      {/* Main Viewport Container */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      {/* Main Viewport Container: strictly bounded to available height */}
+      <main className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {activeView === 'destinations' ? (
-          <DestinationsGallery
-            onSelectDestinationForTrip={(locId) => {
-              setModalTargetDestinationId(locId);
-              setIsCreateModalOpen(true);
-            }}
-          />
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto">
+            <DestinationsGallery
+              onSelectDestinationForTrip={(locId) => {
+                setModalTargetDestinationId(locId);
+                setIsCreateModalOpen(true);
+              }}
+            />
+          </div>
         ) : !currentTrip ? (
           /* Flujo Inicial Simplificado de Creación de Viaje */
           <TripCreationScreen
@@ -373,19 +376,22 @@ export default function App() {
             onSelectSavedTrip={handleSelectSavedTrip}
           />
         ) : (
-          /* Workspace Wanderlog: Sidebar + Contenido Central + Mapa Persistente */
-          <div className="flex-1 flex flex-col lg:flex-row h-[calc(100vh-56px)] overflow-hidden">
+          /* Workspace: Sidebar + Contenido Central + Mapa Persistente */
+          <div className="h-full flex-1 min-h-0 min-w-0 flex flex-col lg:flex-row overflow-hidden">
             {/* Contenedor de Planificación (Sidebar + Contenido Central) */}
             <div
-              className={`h-full ${
-                mobileTab === 'content' ? 'flex flex-1' : 'hidden'
-              } lg:flex lg:flex-initial transition-all z-10 shrink-0`}
+              className={`h-full min-h-0 ${
+                mobileTab === 'content' ? 'flex flex-1 min-w-0' : 'hidden'
+              } lg:flex ${isMapCollapsed ? 'flex-1 min-w-0' : 'lg:flex-initial min-w-0'} transition-all z-10 shrink-0`}
             >
               {/* Barra lateral de navegación */}
               <WorkspaceSidebar
                 trip={currentTrip}
                 activeSection={activeSection}
-                onSelectSection={setActiveSection}
+                onSelectSection={(section) => {
+                  setActiveSection(section);
+                  window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+                }}
                 selectedDayNumber={selectedDayNumber}
                 onSelectDayNumber={setSelectedDayNumber}
               />
@@ -406,14 +412,16 @@ export default function App() {
                 onReorderActivity={handleReorderActivity}
                 onAddManualActivity={handleAddManualActivity}
                 onUpdateNotes={handleUpdateNotes}
+                isMapCollapsed={isMapCollapsed}
+                onToggleMapCollapse={() => setIsMapCollapsed((prev) => !prev)}
               />
             </div>
 
             {/* Panel Derecho: Mapa Persistente MapLibre */}
             <div
-              className={`h-full ${
-                mobileTab === 'map' ? 'flex flex-1' : 'hidden'
-              } lg:flex flex-1 relative overflow-hidden`}
+              className={`h-full min-h-0 ${
+                mobileTab === 'map' ? 'flex flex-1 min-w-0' : 'hidden'
+              } ${isMapCollapsed ? 'lg:flex lg:w-12 lg:flex-none' : 'lg:flex flex-1 min-w-0'} relative overflow-hidden transition-all`}
             >
               <MapPanel
                 trip={currentTrip}
@@ -422,6 +430,8 @@ export default function App() {
                 onSelectPlace={setSelectedPlace}
                 onAddPlaceToDay={(place, day) => handleAddPlaceToDay(place, day)}
                 onRemoveActivity={handleRemoveActivity}
+                isCollapsed={isMapCollapsed}
+                onToggleCollapse={() => setIsMapCollapsed((prev) => !prev)}
               />
             </div>
           </div>

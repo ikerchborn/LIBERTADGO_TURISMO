@@ -62,7 +62,32 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
             </div>
           </div>
 
-          {/* Section 2: Arquitectura del Sistema (Clean Architecture) */}
+          {/* Section 2: Fuentes de Datos y Estrategia Turística */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-900 mb-2 flex items-center gap-2">
+              <Database className="w-4 h-4 text-emerald-600" />
+              <span>Estrategia de Fuentes de Datos (La Libertad)</span>
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                <span className="font-bold text-[#17243A] block mb-0.5">1. MINCETUR & Directorio Nacional</span>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  Inventario Nacional de Recursos Turísticos y Directorio de Prestadores Calificados de La Libertad. Fichas oficiales con códigos de registro.
+                </p>
+              </div>
+              <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                <span className="font-bold text-[#17243A] block mb-0.5">2. OpenStreetMap & Catálogo Propio</span>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  Geodatos abiertos, polígonos, calles y coordenadas validadas dentro de la región La Libertad con deduplicación por ID/slug.
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 p-2.5 bg-amber-50/80 border border-amber-200 rounded-lg text-xs text-amber-900">
+              <strong>Estado de Google Places API:</strong> Identificado como complemento futuro. No está configurado en este entorno por requerir provisión de proyecto en Google Cloud con facturación activa y variable de entorno <code>GOOGLE_PLACES_API_KEY</code>. La aplicación opera con 100% de autonomía gracias al catálogo MINCETUR/OSM verificado.
+            </div>
+          </div>
+
+          {/* Section 3: Arquitectura del Sistema (Clean Architecture) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-xs uppercase mb-1.5">
@@ -70,10 +95,10 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
                 <span>Frontend (React 19)</span>
               </div>
               <ul className="text-xs space-y-1 text-slate-600">
-                <li>• Workspace de 3 paneles sincronizados</li>
+                <li>• Workspace coordinado de 3 paneles</li>
                 <li>• MapLibre GL JS + OpenStreetMap</li>
-                <li>• Drag & drop para itinerario</li>
-                <li>• Responsive (Móvil / Tablet / Desktop)</li>
+                <li>• Mapa contraíble con ResizeObserver</li>
+                <li>• Navegación independiente por sección</li>
               </ul>
             </div>
 
@@ -85,21 +110,21 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
               <ul className="text-xs space-y-1 text-slate-600">
                 <li>• Validación estricta con Zod</li>
                 <li>• Repositorios & Controladores desacoplados</li>
-                <li>• Geohashes & bounding box filters</li>
-                <li>• Endpoints REST para viajes y catálogo</li>
+                <li>• Búsqueda por texto y filtros por categoría</li>
+                <li>• Endpoints REST con paginación</li>
               </ul>
             </div>
 
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-xs uppercase mb-1.5">
-                <Cpu className="w-4 h-4 text-emerald-600" />
-                <span>Catálogo & AI (Gemini)</span>
+                <Calendar className="w-4 h-4 text-purple-600" />
+                <span>Consistencia Temporal (UTC)</span>
               </div>
               <ul className="text-xs space-y-1 text-slate-600">
-                <li>• Procedencia: MINCETUR + OSM + Negocios</li>
-                <li>• Deduplicación por coordenadas</li>
-                <li>• Módulo Gemini server-side desacoplado</li>
-                <li>• Sin alucinación de coordenadas/precios</li>
+                <li>• Aritmética de fechas en UTC estricto</li>
+                <li>• Cero desfases por zona horaria</li>
+                <li>• Cálculo sincronizado de días y noches</li>
+                <li>• Desglose coherente en todas las vistas</li>
               </ul>
             </div>
           </div>

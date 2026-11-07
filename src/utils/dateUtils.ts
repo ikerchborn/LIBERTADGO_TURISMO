@@ -21,19 +21,35 @@ export interface TripDayItem {
  * Calculates total days and nights between arrival and departure dates.
  * Enforces arrival <= departure and maximum 30 days for MVP planning.
  */
+function parseDateParts(dateStr: string): [number, number, number] | null {
+  if (!dateStr) return null;
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  const [year, month, day] = parts;
+  return [year, month, day];
+}
+
+/**
+ * Calculates total days and nights between arrival and departure dates.
+ * Enforces arrival <= departure and maximum 45 days for planning.
+ * Strictly timezone-safe using UTC day counts.
+ */
 export function calculateTripDuration(startDateStr: string, endDateStr: string): TripDurationResult {
   if (!startDateStr || !endDateStr) {
     return { days: 0, nights: 0, isValid: false, error: 'Ambas fechas son obligatorias' };
   }
 
-  const start = new Date(startDateStr + 'T00:00:00');
-  const end = new Date(endDateStr + 'T00:00:00');
+  const startParts = parseDateParts(startDateStr);
+  const endParts = parseDateParts(endDateStr);
 
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+  if (!startParts || !endParts) {
     return { days: 0, nights: 0, isValid: false, error: 'Formato de fecha inválido' };
   }
 
-  const diffTime = end.getTime() - start.getTime();
+  const startUtc = Date.UTC(startParts[0], startParts[1] - 1, startParts[2]);
+  const endUtc = Date.UTC(endParts[0], endParts[1] - 1, endParts[2]);
+
+  const diffTime = endUtc - startUtc;
   const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
   if (diffDays < 0) {
@@ -67,26 +83,25 @@ export function calculateTripDuration(startDateStr: string, endDateStr: string):
 }
 
 /**
- * Formats a date range in clean Spanish, e.g. "3 nov. – 7 nov. 2026" or "28 oct. – 2 nov. 2026"
+ * Formats a date range in clean Spanish, e.g. "3 – 7 nov. 2026" or "28 oct. – 2 nov. 2026"
+ * Strictly timezone-safe using parsed parts.
  */
 export function formatDateRange(startDateStr: string, endDateStr: string): string {
   if (!startDateStr || !endDateStr) return '';
-  const start = new Date(startDateStr + 'T00:00:00');
-  const end = new Date(endDateStr + 'T00:00:00');
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) return '';
+  const startParts = parseDateParts(startDateStr);
+  const endParts = parseDateParts(endDateStr);
+  if (!startParts || !endParts) return '';
 
   const months = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'set.', 'oct.', 'nov.', 'dic.'];
 
-  const startDay = start.getDate();
-  const startMonth = months[start.getMonth()];
-  const startYear = start.getFullYear();
+  const [startYear, startMonthNum, startDay] = startParts;
+  const [endYear, endMonthNum, endDay] = endParts;
 
-  const endDay = end.getDate();
-  const endMonth = months[end.getMonth()];
-  const endYear = end.getFullYear();
+  const startMonth = months[startMonthNum - 1] || '';
+  const endMonth = months[endMonthNum - 1] || '';
 
   if (startYear === endYear) {
-    if (startMonth === endMonth) {
+    if (startMonthNum === endMonthNum) {
       if (startDay === endDay) {
         return `${startDay} ${startMonth} ${startYear}`;
       }
@@ -100,29 +115,29 @@ export function formatDateRange(startDateStr: string, endDateStr: string): strin
 
 /**
  * Generates an array of day descriptors for the itinerary organizer.
+ * Strictly timezone-safe using UTC arithmetic.
  */
 export function generateDayList(startDateStr: string, daysCount: number): TripDayItem[] {
   if (!startDateStr || daysCount <= 0) return [];
-  const start = new Date(startDateStr + 'T00:00:00');
-  if (isNaN(start.getTime())) return [];
+  const startParts = parseDateParts(startDateStr);
+  if (!startParts) return [];
 
   const weekdaysShort = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const monthsShort = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'set', 'oct', 'nov', 'dic'];
 
   const days: TripDayItem[] = [];
+  const baseUtc = Date.UTC(startParts[0], startParts[1] - 1, startParts[2]);
 
   for (let i = 0; i < daysCount; i++) {
-    const current = new Date(start);
-    current.setDate(start.getDate() + i);
-
-    const yyyy = current.getFullYear();
-    const mm = String(current.getMonth() + 1).padStart(2, '0');
-    const dd = String(current.getDate()).padStart(2, '0');
+    const dayUtc = new Date(baseUtc + i * 86400000);
+    const yyyy = dayUtc.getUTCFullYear();
+    const mm = String(dayUtc.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dayUtc.getUTCDate()).padStart(2, '0');
     const dateString = `${yyyy}-${mm}-${dd}`;
 
-    const weekday = weekdaysShort[current.getDay()];
-    const dayNumber = current.getDate();
-    const month = monthsShort[current.getMonth()];
+    const weekday = weekdaysShort[dayUtc.getUTCDay()];
+    const dayNumber = dayUtc.getUTCDate();
+    const month = monthsShort[dayUtc.getUTCMonth()];
 
     days.push({
       dayNumber: i + 1,
