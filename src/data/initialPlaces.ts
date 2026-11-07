@@ -24,8 +24,8 @@ export const INITIAL_PLACES: Place[] = [
     images: [
       {
         id: 'img_rv_1',
-        url: '/assets/aistudio/Captura_de_pantalla_2026-11-06_114710_4377a8b3.png',
-        caption: 'Cabrito a la norteña con frijoles y zarza criolla',
+        url: 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=800&q=80',
+        caption: 'Cabrito a la norteña tradicional con frijoles y zarza criolla',
         isCover: true,
       },
     ],
@@ -75,8 +75,8 @@ export const INITIAL_PLACES: Place[] = [
     images: [
       {
         id: 'img_cc_1',
-        url: '/assets/aistudio/Captura_de_pantalla_2026-11-06_114806_d0ad01fd.png',
-        caption: 'Cava de vinos y comedor colonial de El Celler de Cler',
+        url: 'https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?auto=format&fit=crop&w=800&q=80',
+        caption: 'Cava de vinos y comedor en casona colonial de El Celler de Cler',
         isCover: true,
       },
     ],
@@ -277,8 +277,8 @@ export const INITIAL_PLACES: Place[] = [
     images: [
       {
         id: 'img_pm_1',
-        url: '/assets/aistudio/Captura_de_pantalla_2026-11-06_114428_29ab2ca8.png',
-        caption: 'Basílica Catedral de Santa María y Plaza Mayor iluminada al atardecer',
+        url: 'https://images.unsplash.com/photo-1580619305218-8423a7ef79b4?auto=format&fit=crop&w=800&q=80',
+        caption: 'Plaza Mayor de Trujillo con el Monumento a la Libertad y arquitectura colonial',
         isCover: true,
       },
     ],
@@ -317,8 +317,8 @@ export const INITIAL_PLACES: Place[] = [
     images: [
       {
         id: 'img_cat_1',
-        url: '/assets/aistudio/Captura_de_pantalla_2026-11-06_114428_29ab2ca8.png',
-        caption: 'Campanarios barrocos de la Catedral de Trujillo',
+        url: 'https://images.unsplash.com/photo-1548013146-72479768bada?auto=format&fit=crop&w=800&q=80',
+        caption: 'Campanarios y fachada virreinal de la Catedral de Trujillo',
         isCover: true,
       },
     ],
@@ -600,8 +600,8 @@ export const INITIAL_PLACES: Place[] = [
     images: [
       {
         id: 'img_chanchan_1',
-        url: '/assets/aistudio/Captura_de_pantalla_2026-11-06_114622_427c99b7.png',
-        caption: 'Frisos de adobe en el Conjunto Nik An de Chan Chan',
+        url: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?auto=format&fit=crop&w=800&q=80',
+        caption: 'Muros ceremoniales y frisos de adobe en la ciudadela de Chan Chan',
         isCover: true,
       },
     ],
@@ -922,8 +922,8 @@ export const INITIAL_PLACES: Place[] = [
     images: [
       {
         id: 'img_huacas_sol_1',
-        url: '/assets/aistudio/Captura_de_pantalla_2026-11-06_114622_427c99b7.png',
-        caption: 'Murales policromados de la Huaca de la Luna con el Dios Degollador',
+        url: 'https://images.unsplash.com/photo-1518684079-3c830dcef090?auto=format&fit=crop&w=800&q=80',
+        caption: 'Pirámide y relieves ceremoniales de la Huaca de la Luna (Cultura Moche)',
         isCover: true,
       },
     ],

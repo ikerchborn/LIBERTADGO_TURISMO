@@ -1,0 +1,445 @@
+/**
+ * Memory Adapter Implementation of IAuthRepository and ICreatorsRepository
+ * Used in local development or test suites when PostgreSQL (DATABASE_URL) is not provisioned.
+ * Implements the exact same interface contracts, relationships, and constraints.
+ */
+
+import {
+  IAuthRepository,
+  ICreatorsRepository,
+  VideoFilterOptions,
+  AdminMetrics,
+} from './interfaces.ts';
+import {
+  User,
+  CreatorProfile,
+  VideoSubmission,
+  VideoModerationLog,
+  VideoPlatform,
+  ModerationStatus,
+  VideoPlace,
+  SavedVideo,
+} from '../../types/creators.ts';
+import { Place } from '../../types/catalog.ts';
+import { INITIAL_PLACES } from '../../data/initialPlaces.ts';
+
+export class MemoryCreatorsRepository implements IAuthRepository, ICreatorsRepository {
+  private users: Map<string, User> = new Map();
+  private creatorProfiles: Map<string, CreatorProfile> = new Map(); // key: userId
+  private videoSubmissions: Map<string, VideoSubmission> = new Map();
+  private videoPlaces: Map<string, VideoPlace> = new Map();
+  private moderationLogs: VideoModerationLog[] = [];
+  private savedVideos: Map<string, SavedVideo> = new Map(); // key: `${userId}_${videoId}`
+
+  // --- IAuthRepository ---
+
+  async findUserByEmail(email: string): Promise<User | null> {
+    const normalized = email.toLowerCase().trim();
+    for (const user of this.users.values()) {
+      if (user.email.toLowerCase() === normalized) {
+        return { ...user };
+      }
+    }
+    return null;
+  }
+
+  async findUserById(id: string): Promise<User | null> {
+    const user = this.users.get(id);
+    return user ? { ...user } : null;
+  }
+
+  async createUser(data: {
+    email: string;
+    passwordHash: string;
+    name: string;
+    role?: 'USER' | 'ADMIN';
+    avatarUrl?: string | null;
+  }): Promise<User> {
+    const id = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const newUser: User = {
+      id,
+      email: data.email.toLowerCase().trim(),
+      passwordHash: data.passwordHash,
+      name: data.name,
+      avatarUrl: data.avatarUrl || null,
+      role: data.role || 'USER',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.users.set(id, newUser);
+    return { ...newUser };
+  }
+
+  async countUsers(): Promise<number> {
+    return this.users.size;
+  }
+
+  // --- ICreatorsRepository ---
+
+  async findSubmissionById(id: string): Promise<VideoSubmission | null> {
+    const sub = this.videoSubmissions.get(id);
+    return sub ? { ...sub } : null;
+  }
+
+  async findSubmissionByPlatformAndExternalId(
+    platform: VideoPlatform,
+    externalVideoId: string
+  ): Promise<VideoSubmission | null> {
+    for (const sub of this.videoSubmissions.values()) {
+      if (sub.platform === platform && sub.externalVideoId === externalVideoId) {
+        return { ...sub };
+      }
+    }
+    return null;
+  }
+
+  async createSubmission(
+    data: {
+      userId: string;
+      creatorProfileId?: string | null;
+      platform: VideoPlatform;
+      externalVideoId: string;
+      videoUrl: string;
+      embedUrl: string;
+      thumbnailUrl?: string | null;
+      title: string;
+      description?: string | null;
+      contentType: 'PLACE' | 'ROUTE' | 'GENERAL';
+      category: string;
+      localityId?: string | null;
+    },
+    placeIds: string[] = [],
+    primaryPlaceId?: string | null
+  ): Promise<VideoSubmission> {
+    const id = `vid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+
+    const submission: VideoSubmission = {
+      ...data,
+      id,
+      creatorProfileId: data.creatorProfileId || null,
+      thumbnailUrl: data.thumbnailUrl || null,
+      description: data.description || null,
+      localityId: data.localityId || null,
+      status: 'PENDING',
+      moderationNotes: null,
+      moderatedBy: null,
+      moderatedAt: null,
+      internalViewsCount: 0,
+      internalSavesCount: 0,
+      externalMetrics: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.videoSubmissions.set(id, submission);
+
+    // Associate places
+    if (placeIds && placeIds.length > 0) {
+      await this.associatePlaces(id, placeIds, primaryPlaceId);
+    }
+
+    return { ...submission };
+  }
+
+  async updateSubmissionStatus(
+    id: string,
+    status: ModerationStatus,
+    notes?: string | null,
+    adminUserId?: string
+  ): Promise<VideoSubmission | null> {
+    const sub = this.videoSubmissions.get(id);
+    if (!sub) return null;
+
+    const updated: VideoSubmission = {
+      ...sub,
+      status,
+      moderationNotes: notes || null,
+      moderatedBy: adminUserId || null,
+      moderatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.videoSubmissions.set(id, updated);
+    return { ...updated };
+  }
+
+  async listApprovedVideos(
+    filters: VideoFilterOptions = {}
+  ): Promise<{ videos: (VideoSubmission & { places: Place[] })[]; total: number }> {
+    let list = Array.from(this.videoSubmissions.values()).filter(
+      (v) => v.status === 'APPROVED'
+    );
+
+    if (filters.localityId && filters.localityId !== 'todas') {
+      const loc = filters.localityId.toLowerCase();
+      list = list.filter((v) => v.localityId?.toLowerCase() === loc);
+    }
+
+    if (filters.category && filters.category !== 'todas') {
+      const cat = filters.category.toLowerCase();
+      list = list.filter((v) => v.category.toLowerCase() === cat);
+    }
+
+    if (filters.contentType) {
+      list = list.filter((v) => v.contentType === filters.contentType);
+    }
+
+    if (filters.platform) {
+      list = list.filter((v) => v.platform === filters.platform);
+    }
+
+    if (filters.q) {
+      const q = filters.q.toLowerCase().trim();
+      list = list.filter(
+        (v) =>
+          v.title.toLowerCase().includes(q) ||
+          (v.description && v.description.toLowerCase().includes(q))
+      );
+    }
+
+    if (filters.placeId) {
+      const placeId = filters.placeId;
+      const matchingVideoIds = new Set(
+        Array.from(this.videoPlaces.values())
+          .filter((vp) => vp.placeId === placeId)
+          .map((vp) => vp.videoId)
+      );
+      list = list.filter((v) => matchingVideoIds.has(v.id));
+    }
+
+    // Sort newest first
+    list.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const total = list.length;
+    const page = Math.max(1, filters.page || 1);
+    const limit = Math.min(50, Math.max(1, filters.limit || 20));
+    const start = (page - 1) * limit;
+    const paginated = list.slice(start, start + limit);
+
+    const videosWithPlaces = await Promise.all(
+      paginated.map(async (v) => {
+        const places = await this.getPlacesForVideo(v.id);
+        return { ...v, places };
+      })
+    );
+
+    return { videos: videosWithPlaces, total };
+  }
+
+  async listSubmissionsByUser(userId: string): Promise<VideoSubmission[]> {
+    const list = Array.from(this.videoSubmissions.values())
+      .filter((v) => v.userId === userId)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    return list.map((v) => ({ ...v }));
+  }
+
+  async listModerationQueue(
+    status: ModerationStatus = 'PENDING'
+  ): Promise<VideoSubmission[]> {
+    const list = Array.from(this.videoSubmissions.values())
+      .filter((v) => v.status === status)
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+    return list.map((v) => ({ ...v }));
+  }
+
+  async addModerationLog(log: {
+    videoId: string;
+    adminUserId: string;
+    adminName: string;
+    previousStatus: ModerationStatus;
+    newStatus: ModerationStatus;
+    reason?: string | null;
+    internalNotes?: string | null;
+  }): Promise<VideoModerationLog> {
+    const id = `mod_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newLog: VideoModerationLog = {
+      ...log,
+      id,
+      reason: log.reason || null,
+      internalNotes: log.internalNotes || null,
+      createdAt: new Date().toISOString(),
+    };
+    this.moderationLogs.unshift(newLog);
+    return { ...newLog };
+  }
+
+  async getModerationLogs(videoId: string): Promise<VideoModerationLog[]> {
+    return this.moderationLogs
+      .filter((l) => l.videoId === videoId)
+      .map((l) => ({ ...l }));
+  }
+
+  async associatePlaces(
+    videoId: string,
+    placeIds: string[],
+    primaryPlaceId?: string | null
+  ): Promise<void> {
+    // Remove previous associations
+    for (const [k, vp] of this.videoPlaces.entries()) {
+      if (vp.videoId === videoId) {
+        this.videoPlaces.delete(k);
+      }
+    }
+
+    placeIds.forEach((pId, idx) => {
+      const isPrimary = primaryPlaceId ? primaryPlaceId === pId : idx === 0;
+      const id = `vp_${videoId}_${pId}`;
+      this.videoPlaces.set(id, {
+        id,
+        videoId,
+        placeId: pId,
+        isPrimary,
+        createdAt: new Date().toISOString(),
+      });
+    });
+  }
+
+  async getPlacesForVideo(videoId: string): Promise<Place[]> {
+    const pIds = Array.from(this.videoPlaces.values())
+      .filter((vp) => vp.videoId === videoId)
+      .sort((a, b) => (b.isPrimary ? 1 : 0) - (a.isPrimary ? 1 : 0))
+      .map((vp) => vp.placeId);
+
+    return INITIAL_PLACES.filter((p) => pIds.includes(p.id));
+  }
+
+  async getVideosForPlace(placeId: string): Promise<VideoSubmission[]> {
+    const videoIds = new Set(
+      Array.from(this.videoPlaces.values())
+        .filter((vp) => vp.placeId === placeId)
+        .map((vp) => vp.videoId)
+    );
+
+    return Array.from(this.videoSubmissions.values())
+      .filter((v) => videoIds.has(v.id) && v.status === 'APPROVED')
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+  }
+
+  async findCreatorProfileByUserId(userId: string): Promise<CreatorProfile | null> {
+    const prof = this.creatorProfiles.get(userId);
+    return prof ? { ...prof } : null;
+  }
+
+  async findCreatorProfileByHandle(handle: string): Promise<CreatorProfile | null> {
+    const lower = handle.toLowerCase();
+    for (const prof of this.creatorProfiles.values()) {
+      if (prof.handle.toLowerCase() === lower) {
+        return { ...prof };
+      }
+    }
+    return null;
+  }
+
+  async saveCreatorProfile(data: {
+    userId: string;
+    handle: string;
+    displayName: string;
+    bio?: string | null;
+    avatarUrl?: string | null;
+    primaryPlatform: VideoPlatform;
+    tiktokUrl?: string | null;
+    instagramUrl?: string | null;
+    youtubeUrl?: string | null;
+    isPublic: boolean;
+  }): Promise<CreatorProfile> {
+    const existing = this.creatorProfiles.get(data.userId);
+    const now = new Date().toISOString();
+
+    const profile: CreatorProfile = {
+      id: existing ? existing.id : `cp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: data.userId,
+      handle: data.handle.toLowerCase().trim(),
+      displayName: data.displayName,
+      bio: data.bio || null,
+      avatarUrl: data.avatarUrl || null,
+      primaryPlatform: data.primaryPlatform,
+      tiktokUrl: data.tiktokUrl || null,
+      instagramUrl: data.instagramUrl || null,
+      youtubeUrl: data.youtubeUrl || null,
+      isPublic: data.isPublic,
+      isVerified: existing ? existing.isVerified : false,
+      totalApprovedVideos: existing ? existing.totalApprovedVideos : 0,
+      createdAt: existing ? existing.createdAt : now,
+      updatedAt: now,
+    };
+
+    this.creatorProfiles.set(data.userId, profile);
+    return { ...profile };
+  }
+
+  async listPublicCreators(): Promise<CreatorProfile[]> {
+    return Array.from(this.creatorProfiles.values())
+      .filter((c) => c.isPublic)
+      .sort((a, b) => b.totalApprovedVideos - a.totalApprovedVideos);
+  }
+
+  async incrementInternalViews(videoId: string): Promise<void> {
+    const sub = this.videoSubmissions.get(videoId);
+    if (sub) {
+      sub.internalViewsCount += 1;
+    }
+  }
+
+  async toggleSaveVideo(userId: string, videoId: string): Promise<{ saved: boolean }> {
+    const key = `${userId}_${videoId}`;
+    const sub = this.videoSubmissions.get(videoId);
+
+    if (this.savedVideos.has(key)) {
+      this.savedVideos.delete(key);
+      if (sub) sub.internalSavesCount = Math.max(0, sub.internalSavesCount - 1);
+      return { saved: false };
+    } else {
+      this.savedVideos.set(key, {
+        id: `sv_${Date.now()}`,
+        userId,
+        videoId,
+        savedAt: new Date().toISOString(),
+      });
+      if (sub) sub.internalSavesCount += 1;
+      return { saved: true };
+    }
+  }
+
+  async isSavedByUser(userId: string, videoId: string): Promise<boolean> {
+    return this.savedVideos.has(`${userId}_${videoId}`);
+  }
+
+  async getAdminMetrics(): Promise<AdminMetrics> {
+    const subs = Array.from(this.videoSubmissions.values());
+    return {
+      totalSubmissions: subs.length,
+      pendingCount: subs.filter((s) => s.status === 'PENDING').length,
+      approvedCount: subs.filter((s) => s.status === 'APPROVED').length,
+      observedCount: subs.filter((s) => s.status === 'OBSERVED').length,
+      rejectedCount: subs.filter((s) => s.status === 'REJECTED').length,
+      totalCreators: this.creatorProfiles.size,
+    };
+  }
+
+  async testConnection(): Promise<void> {
+    // Memory adapter is always connected in development
+    return Promise.resolve();
+  }
+
+  async close(): Promise<void> {
+    this.users.clear();
+    this.videoSubmissions.clear();
+    this.videoPlaces.clear();
+    this.savedVideos.clear();
+    this.moderationLogs = [];
+    return Promise.resolve();
+  }
+}

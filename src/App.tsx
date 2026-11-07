@@ -394,6 +394,7 @@ export default function App() {
                 }}
                 selectedDayNumber={selectedDayNumber}
                 onSelectDayNumber={setSelectedDayNumber}
+                totalPlacesCount={places.length}
               />
 
               {/* Área central con el contenido de la sección activa */}
@@ -413,7 +414,6 @@ export default function App() {
                 onAddManualActivity={handleAddManualActivity}
                 onUpdateNotes={handleUpdateNotes}
                 isMapCollapsed={isMapCollapsed}
-                onToggleMapCollapse={() => setIsMapCollapsed((prev) => !prev)}
               />
             </div>
 
@@ -430,6 +430,8 @@ export default function App() {
                 onSelectPlace={setSelectedPlace}
                 onAddPlaceToDay={(place, day) => handleAddPlaceToDay(place, day)}
                 onRemoveActivity={handleRemoveActivity}
+                onToggleSavePlace={handleToggleSavePlace}
+                selectedDayNumber={selectedDayNumber}
                 isCollapsed={isMapCollapsed}
                 onToggleCollapse={() => setIsMapCollapsed((prev) => !prev)}
               />

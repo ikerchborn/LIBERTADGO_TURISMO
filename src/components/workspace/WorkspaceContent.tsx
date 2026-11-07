@@ -4,11 +4,9 @@ import {
   Plus,
   Bookmark,
   Calendar,
-  Clock,
   Trash2,
   ArrowUp,
   ArrowDown,
-  Check,
   MapPin,
   Star,
   ShieldCheck,
@@ -17,13 +15,13 @@ import {
   X,
   Compass,
   FileText,
-  Map as MapIcon,
   Info,
-  ExternalLink
+  Check
 } from 'lucide-react';
-import { Place, PlaceCategory, TripItinerary, TripActivity } from '../../types/catalog.ts';
+import { Place, PlaceCategory, TripItinerary } from '../../types/catalog.ts';
 import { generateDayList, TripDayItem } from '../../utils/dateUtils.ts';
 import { WorkspaceSection } from './WorkspaceSidebar.tsx';
+import { PlaceImage } from '../common/PlaceImage.tsx';
 
 interface WorkspaceContentProps {
   trip: TripItinerary;
@@ -41,7 +39,6 @@ interface WorkspaceContentProps {
   onAddManualActivity: (dayNumber: number, title: string, timeSlot?: string, notes?: string) => void;
   onUpdateNotes: (notes: string) => void;
   isMapCollapsed?: boolean;
-  onToggleMapCollapse?: () => void;
 }
 
 const CATEGORIES: { id: PlaceCategory | 'todas'; label: string }[] = [
@@ -70,7 +67,6 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   onAddManualActivity,
   onUpdateNotes,
   isMapCollapsed = false,
-  onToggleMapCollapse,
 }) => {
   // Búsqueda y categoría para Explorar
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -83,14 +79,13 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   const [manualTime, setManualTime] = useState<string>('');
   const [manualNotes, setManualNotes] = useState<string>('');
 
-  // Ref para garantizar que cada sección comience desde arriba (Problema 1)
+  // Ref para garantizar que cada sección comience desde arriba
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
     }
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [activeSection, trip.id]);
 
   const dayItems: TripDayItem[] = useMemo(() => {
@@ -121,7 +116,12 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   const handleCreateManual = (e: React.FormEvent, dayNum: number) => {
     e.preventDefault();
     if (!manualTitle.trim()) return;
-    onAddManualActivity(dayNum, manualTitle.trim(), manualTime.trim() || undefined, manualNotes.trim() || undefined);
+    onAddManualActivity(
+      dayNum,
+      manualTitle.trim(),
+      manualTime.trim() || undefined,
+      manualNotes.trim() || undefined
+    );
     setManualTitle('');
     setManualTime('');
     setManualNotes('');
@@ -134,103 +134,87 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
   // ==========================================
   // SECCIÓN 1: RESUMEN (OVERVIEW)
-  // Comienza desde la parte superior sin desplazamientos automáticos
   // ==========================================
   if (activeSection === 'overview') {
     return (
       <div
         ref={scrollContainerRef}
-        className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col p-6 overflow-y-auto select-none`}
+        className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col p-5 md:p-6 overflow-y-auto select-none`}
       >
-        <div className="flex items-start justify-between mb-6 pb-4 border-b border-[#E9EEF4]">
+        <div className="flex items-start justify-between mb-5 pb-4 border-b border-[#E9EEF4]">
           <div>
-            <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block mb-1">
+            <span className="text-[10px] font-bold text-[#E85B49] uppercase tracking-wider block mb-1">
               Resumen del viaje
             </span>
             <h2 className="text-xl font-bold font-display text-[#17243A]">
               {trip.title}
             </h2>
             <p className="text-xs text-[#64748B] mt-1">
-              Destino: <strong className="text-[#17243A]">{trip.destinationName}</strong>, Región La Libertad · {trip.totalDays} días ({trip.totalNights} noches)
+              Destino: <strong className="text-[#17243A]">{trip.destinationName}</strong>, La Libertad · {trip.totalDays} días ({trip.totalNights} noches)
             </p>
           </div>
-
-          {onToggleMapCollapse && (
-            <button
-              type="button"
-              onClick={onToggleMapCollapse}
-              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 text-xs text-[#17243A] bg-[#F7F8FA] hover:bg-[#E9EEF4] rounded-lg border border-[#E9EEF4] cursor-pointer transition-colors"
-              title={isMapCollapsed ? 'Ver mapa lateral' : 'Contraer mapa'}
-            >
-              <MapIcon className="w-3.5 h-3.5 text-[#E85B49]" />
-              <span>{isMapCollapsed ? 'Ver mapa' : 'Ocultar mapa'}</span>
-            </button>
-          )}
         </div>
 
-        {/* Métricas clave */}
+        {/* Indicadores claros y diferenciados */}
         <div className="grid grid-cols-3 gap-3 mb-6">
           <div className="p-3 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] text-center">
-            <span className="text-lg font-bold font-mono text-[#17243A] block">
+            <span className="text-lg font-bold font-mono text-[#E85B49] block">
               {trip.activities.length}
             </span>
-            <span className="text-[11px] text-[#64748B]">Actividades</span>
+            <span className="text-[11px] text-[#64748B] font-medium">Actividades</span>
           </div>
           <div className="p-3 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] text-center">
-            <span className="text-lg font-bold font-mono text-[#17243A] block">
+            <span className="text-lg font-bold font-mono text-[#D97706] block">
               {savedPlaces.length}
             </span>
-            <span className="text-[11px] text-[#64748B]">Por visitar</span>
+            <span className="text-[11px] text-[#64748B] font-medium">Por visitar</span>
           </div>
           <div className="p-3 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] text-center">
             <span className="text-lg font-bold font-mono text-[#17243A] block">
-              {trip.totalDays}
+              {places.length}
             </span>
-            <span className="text-[11px] text-[#64748B]">Días</span>
+            <span className="text-[11px] text-[#64748B] font-medium">Disponibles</span>
           </div>
         </div>
 
-        {/* Cobertura del destino */}
-        <div className="p-4 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] mb-6">
+        {/* Guía del destino */}
+        <div className="p-4 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] mb-5">
           <h3 className="text-xs font-bold text-[#17243A] mb-1">
-            Información de {trip.destinationName}
+            Planificación en {trip.destinationName}
           </h3>
           <p className="text-xs text-[#64748B] leading-relaxed">
-            Destino emblemático del norte peruano. Para maximizar tu experiencia, añade atractivos arqueológicos en las mañanas y gastronomía criolla tradicional hacia el mediodía.
+            Organiza tus visitas por zonas geográficas para optimizar traslados. Explora el catálogo, guarda los lugares que te interesen en «Por visitar» o asígnalos directamente a un día.
           </p>
         </div>
 
-        {/* Fuentes de Datos Oficiales */}
-        <div className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-xl mb-6">
+        {/* Fuentes Oficiales Verificadas */}
+        <div className="p-4 bg-emerald-50/70 border border-emerald-200/90 rounded-xl mb-5">
           <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-950 mb-1">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>Fuentes de Datos Conectadas</span>
+            <span>Datos Certificados de La Libertad</span>
           </div>
-          <p className="text-[11px] text-emerald-800 leading-relaxed mb-2">
-            Catálogo certificado de La Libertad: <strong>MINCETUR</strong> (Directorio Nacional e Inventario de Recursos), <strong>OpenStreetMap</strong> y catálogo regional oficial.
+          <p className="text-[11px] text-emerald-800 leading-relaxed">
+            Lugares verificados con inventarios de <strong>MINCETUR</strong> y cartografía georreferenciada de <strong>OpenStreetMap</strong>.
           </p>
-          <div className="text-[10px] text-slate-500 bg-white/70 p-2 rounded-lg border border-emerald-100">
-            <strong>Estado Google Places API:</strong> Pendiente de provisión de clave externa y facturación GCP. Se opera actualmente con datos oficiales verificados de La Libertad sin requerir cuotas externas.
-          </div>
         </div>
 
-        {/* Desglose rápido por días */}
+        {/* Desglose por días */}
         <div className="space-y-2">
           <h3 className="text-xs font-bold text-[#17243A] uppercase tracking-wider mb-2">
-            Plan diario
+            Desglose del Itinerario
           </h3>
           {dayItems.map((day) => {
             const count = trip.activities.filter((a) => a.dayNumber === day.dayNumber).length;
             return (
               <div
                 key={day.dayNumber}
-                className="flex items-center justify-between p-3 bg-white border border-[#E9EEF4] rounded-xl"
+                className="flex items-center justify-between p-3 bg-white border border-[#E9EEF4] rounded-xl hover:border-slate-300 transition-colors"
               >
                 <div>
                   <div className="text-xs font-semibold text-[#17243A]">{day.label}</div>
                   <div className="text-[11px] text-[#64748B]">{day.formattedDate}</div>
                 </div>
-                <span className="text-xs font-mono font-medium text-[#17243A]">
+                <span className="text-xs font-mono font-semibold text-[#17243A] bg-[#F7F8FA] px-2 py-0.5 rounded border border-[#E9EEF4]">
                   {count} {count === 1 ? 'actividad' : 'actividades'}
                 </span>
               </div>
@@ -250,40 +234,43 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
         ref={scrollContainerRef}
         className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col overflow-hidden select-none`}
       >
-        {/* Cabecera de búsqueda y filtros */}
+        {/* Cabecera de búsqueda y métrica explícita */}
         <div className="p-4 border-b border-[#E9EEF4] space-y-3 bg-white shrink-0">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold font-display text-[#17243A]">
-              Explorar {trip.destinationName}
-            </h2>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-[#64748B]">
-                {filteredPlaces.length} lugares
-              </span>
-              {onToggleMapCollapse && (
-                <button
-                  type="button"
-                  onClick={onToggleMapCollapse}
-                  className="hidden lg:flex items-center gap-1 text-[11px] font-medium text-[#64748B] hover:text-[#17243A] px-2 py-1 bg-[#F7F8FA] rounded-md border border-[#E9EEF4] cursor-pointer"
-                  title={isMapCollapsed ? 'Ver mapa lateral' : 'Contraer mapa'}
-                >
-                  <MapIcon className="w-3 h-3 text-[#E85B49]" />
-                  <span>{isMapCollapsed ? 'Ver mapa' : 'Ocultar mapa'}</span>
-                </button>
-              )}
+            <div>
+              <h2 className="text-sm font-bold font-display text-[#17243A]">
+                Explorar {trip.destinationName}
+              </h2>
+              {/* Diferenciación clara de resultados vs total */}
+              <p className="text-[11px] text-[#64748B] mt-0.5">
+                Mostrando <strong className="text-[#17243A]">{filteredPlaces.length}</strong> de <strong className="text-[#17243A]">{places.length}</strong> lugares disponibles
+              </p>
             </div>
+            <span className="text-[10px] font-mono font-medium text-[#64748B] bg-[#F7F8FA] px-2 py-1 rounded border border-[#E9EEF4]">
+              {savedPlaces.length} guardados
+            </span>
           </div>
 
-          {/* Buscador limpio */}
+          {/* Buscador */}
           <div className="relative">
             <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={`Buscar ceviche, huacas, museos, surf en ${trip.destinationName}...`}
-              className="w-full pl-9 pr-3 py-2 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] placeholder:text-[#64748B]/60 focus:outline-none focus:border-[#17243A]"
+              placeholder={`Buscar en ${trip.destinationName} (ceviche, huacas, museos, playa)...`}
+              className="w-full pl-9 pr-8 py-2 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] placeholder:text-[#64748B]/60 focus:outline-none focus:border-[#17243A] transition-colors"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                title="Limpiar búsqueda"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           {/* Chips de Categorías */}
@@ -296,7 +283,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                 className={`px-2.5 py-1 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer shrink-0 ${
                   selectedCategory === cat.id
                     ? 'bg-[#17243A] text-white font-medium'
-                    : 'bg-[#F7F8FA] text-[#64748B] hover:text-[#17243A]'
+                    : 'bg-[#F7F8FA] text-[#64748B] hover:text-[#17243A] hover:bg-[#E9EEF4]'
                 }`}
               >
                 {cat.label}
@@ -312,24 +299,27 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectPlace(null)}
-                className="text-xs text-[#64748B] hover:text-[#17243A] font-medium cursor-pointer"
+                className="text-xs text-[#64748B] hover:text-[#17243A] font-semibold flex items-center gap-1 cursor-pointer"
               >
-                ← Volver a la lista
+                ← Volver al listado
               </button>
               {selectedPlace.verification.isVerified && (
                 <span className="text-[10px] text-[#27856C] bg-[#27856C]/10 px-2 py-0.5 rounded font-medium flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" />
-                  {selectedPlace.verification.verificationLevel === 'official_mincetur' ? 'MINCETUR Oficial' : 'Verificado La Libertad'}
+                  {selectedPlace.verification.verificationLevel === 'official_mincetur'
+                    ? 'MINCETUR Oficial'
+                    : 'Verificado La Libertad'}
                 </span>
               )}
             </div>
 
             <div className="bg-white rounded-xl border border-[#E9EEF4] overflow-hidden shadow-xs">
+              {/* Fotografía de alta calidad con PlaceImage y fallback editorial */}
               <div className="relative h-48 bg-slate-100">
-                <img
-                  src={selectedPlace.images[0]?.url || ''}
+                <PlaceImage
+                  src={selectedPlace.images[0]?.url}
                   alt={selectedPlace.name}
-                  referrerPolicy="no-referrer"
+                  category={selectedPlace.category}
                   className="w-full h-full object-cover"
                 />
               </div>
@@ -371,7 +361,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                   {selectedPlace.sources?.[0] && (
                     <div className="flex items-center gap-2 text-[11px] text-slate-500 pt-1">
                       <Info className="w-3 h-3 text-slate-400" />
-                      <span>Fuente: {selectedPlace.sources[0].sourceId.replace('_', ' ').toUpperCase()} ({selectedPlace.sources[0].externalId})</span>
+                      <span>Fuente: {selectedPlace.sources[0].sourceId.replace('_', ' ').toUpperCase()}</span>
                     </div>
                   )}
                 </div>
@@ -382,19 +372,23 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                     type="button"
                     onClick={() => onToggleSavePlace(selectedPlace.id)}
                     className="p-2 border border-[#E9EEF4] rounded-lg text-[#17243A] hover:bg-[#F7F8FA] cursor-pointer"
-                    title="Guardar en lugares para visitar"
+                    title={
+                      trip.savedPlaceIds?.includes(selectedPlace.id)
+                        ? 'Quitar de lugares para visitar'
+                        : 'Guardar en lugares para visitar'
+                    }
                   >
                     <Bookmark
                       className={`w-4 h-4 ${
                         trip.savedPlaceIds?.includes(selectedPlace.id)
-                          ? 'fill-[#17243A] text-[#17243A]'
+                          ? 'fill-[#D97706] text-[#D97706]'
                           : 'text-[#64748B]'
                       }`}
                     />
                   </button>
 
                   <div className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-                    <span className="text-xs text-[#64748B] shrink-0">Añadir a:</span>
+                    <span className="text-xs text-[#64748B] shrink-0 font-medium">Añadir a:</span>
                     {dayItems.map((d) => (
                       <button
                         key={d.dayNumber}
@@ -411,7 +405,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             </div>
           </div>
         ) : (
-          /* Lista de Tarjetas de Lugares (se adapta a grid cuando el mapa está contraído) */
+          /* Lista de Tarjetas de Lugares */
           <div className="flex-1 overflow-y-auto p-4">
             <div className={`grid grid-cols-1 ${isMapCollapsed ? 'md:grid-cols-2 xl:grid-cols-3' : ''} gap-3`}>
               {filteredPlaces.map((place) => {
@@ -427,12 +421,14 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                   >
                     <div>
                       <div className="flex gap-3">
-                        <img
-                          src={place.images[0]?.url || ''}
-                          alt={place.name}
-                          referrerPolicy="no-referrer"
-                          className="w-16 h-16 rounded-lg object-cover shrink-0 bg-slate-100"
-                        />
+                        <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-slate-100">
+                          <PlaceImage
+                            src={place.images[0]?.url}
+                            alt={place.name}
+                            category={place.category}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
 
                         <div className="flex-1 min-w-0 flex flex-col justify-between">
                           <div>
@@ -441,7 +437,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                                 {place.name}
                               </h4>
                               {activity && (
-                                <span className="text-[10px] font-medium text-[#27856C] bg-[#27856C]/10 px-1.5 py-0.2 rounded shrink-0">
+                                <span className="text-[10px] font-semibold text-white bg-[#E85B49] px-1.5 py-0.2 rounded shrink-0">
                                   Día {activity.dayNumber}
                                 </span>
                               )}
@@ -468,7 +464,9 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
                     <div className="flex items-center justify-between pt-2 mt-2 border-t border-[#E9EEF4]/70 text-xs">
                       <span className="text-[10px] text-[#64748B] bg-[#F7F8FA] px-1.5 py-0.5 rounded border border-[#E9EEF4]">
-                        {place.verification.verificationLevel === 'official_mincetur' ? 'MINCETUR' : 'Verificado'}
+                        {place.verification.verificationLevel === 'official_mincetur'
+                          ? 'MINCETUR'
+                          : 'Verificado'}
                       </span>
 
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -476,11 +474,11 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                           type="button"
                           onClick={() => onToggleSavePlace(place.id)}
                           className="p-1 text-[#64748B] hover:text-[#17243A] cursor-pointer"
-                          title="Guardar en lista"
+                          title={isSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
                         >
                           <Bookmark
                             className={`w-3.5 h-3.5 ${
-                              isSaved ? 'fill-[#17243A] text-[#17243A]' : ''
+                              isSaved ? 'fill-[#D97706] text-[#D97706]' : ''
                             }`}
                           />
                         </button>
@@ -555,33 +553,19 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
               {selectedDayNumber ? `Día ${selectedDayNumber}` : 'Itinerario de viaje'}
             </h2>
             <span className="text-xs text-[#64748B]">
-              {trip.activities.length} actividades organizadas
+              <strong className="text-[#17243A]">{trip.activities.length}</strong> actividades en <strong className="text-[#17243A]">{trip.totalDays}</strong> días
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            {selectedDayNumber && (
-              <button
-                type="button"
-                onClick={() => onSelectDayNumber(null)}
-                className="text-xs text-[#64748B] hover:text-[#17243A] cursor-pointer"
-              >
-                Ver todos
-              </button>
-            )}
-
-            {onToggleMapCollapse && (
-              <button
-                type="button"
-                onClick={onToggleMapCollapse}
-                className="hidden lg:flex items-center gap-1 text-[11px] font-medium text-[#64748B] hover:text-[#17243A] px-2 py-1 bg-[#F7F8FA] rounded-md border border-[#E9EEF4] cursor-pointer"
-                title={isMapCollapsed ? 'Ver mapa lateral' : 'Contraer mapa'}
-              >
-                <MapIcon className="w-3 h-3 text-[#E85B49]" />
-                <span>{isMapCollapsed ? 'Ver mapa' : 'Ocultar mapa'}</span>
-              </button>
-            )}
-          </div>
+          {selectedDayNumber && (
+            <button
+              type="button"
+              onClick={() => onSelectDayNumber(null)}
+              className="text-xs font-semibold text-[#E85B49] hover:underline cursor-pointer"
+            >
+              Ver todos los días
+            </button>
+          )}
         </div>
 
         <div className={`space-y-4 ${isMapCollapsed ? 'max-w-4xl' : ''}`}>
@@ -591,7 +575,10 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
               .sort((a, b) => a.order - b.order);
 
             return (
-              <div key={day.dayNumber} className="border border-[#E9EEF4] rounded-xl overflow-hidden bg-white shadow-2xs">
+              <div
+                key={day.dayNumber}
+                className="border border-[#E9EEF4] rounded-xl overflow-hidden bg-white shadow-2xs"
+              >
                 {/* Cabecera del día */}
                 <div className="flex items-center justify-between p-3 bg-[#F7F8FA] border-b border-[#E9EEF4]">
                   <div>
@@ -606,10 +593,10 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                   <button
                     type="button"
                     onClick={() => setManualFormDay(manualFormDay === day.dayNumber ? null : day.dayNumber)}
-                    className="flex items-center gap-1 px-2.5 py-1 text-xs text-[#17243A] bg-white border border-[#E9EEF4] hover:bg-[#F7F8FA] rounded-lg transition-colors cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs text-[#17243A] bg-white border border-[#E9EEF4] hover:bg-[#F7F8FA] rounded-lg transition-colors cursor-pointer font-medium"
                   >
                     <Plus className="w-3 h-3" />
-                    <span>Actividad</span>
+                    <span>+ Actividad</span>
                   </button>
                 </div>
 
@@ -620,7 +607,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                     className="p-3 bg-[#F7F8FA] border-b border-[#E9EEF4] space-y-2"
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-[#17243A]">Nueva actividad</span>
+                      <span className="text-xs font-semibold text-[#17243A]">Nueva actividad manual</span>
                       <button
                         type="button"
                         onClick={() => setManualFormDay(null)}
@@ -632,7 +619,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
                     <input
                       type="text"
-                      placeholder="Ej. Caminata por el malecón, Almuerzo norteño"
+                      placeholder="Ej. Desayuno en Plaza Mayor, Paseo en caballitos de totora"
                       value={manualTitle}
                       onChange={(e) => setManualTitle(e.target.value)}
                       className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9EEF4] rounded-lg text-[#17243A] focus:outline-none focus:border-[#17243A]"
@@ -679,7 +666,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                 <div className="p-2 space-y-1.5">
                   {dayActs.length === 0 ? (
                     <div className="text-center py-4 text-xs text-[#64748B]">
-                      Sin actividades planificadas para este día. Añade lugares desde Explorar o presiona + Actividad.
+                      Sin actividades para este día. Añade lugares desde Explorar o pulsa + Actividad.
                     </div>
                   ) : (
                     dayActs.map((act, idx) => (
@@ -688,7 +675,8 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                         className="flex items-start justify-between p-2.5 rounded-lg border border-[#E9EEF4] hover:bg-[#F7F8FA] transition-colors"
                       >
                         <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                          <span className="w-5 h-5 rounded-full bg-[#17243A] text-white text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {/* Badge de orden correlativo numerado Wanderlog */}
+                          <span className="w-5 h-5 rounded-full bg-[#E85B49] text-white text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
                             {idx + 1}
                           </span>
                           <div className="min-w-0">
@@ -738,7 +726,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                             disabled={idx === 0}
                             onClick={() => onReorderActivity(act.id, 'up')}
                             className="p-1 text-[#64748B] hover:text-[#17243A] disabled:opacity-20 cursor-pointer"
-                            title="Subir"
+                            title="Subir orden"
                           >
                             <ArrowUp className="w-3 h-3" />
                           </button>
@@ -747,7 +735,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                             disabled={idx === dayActs.length - 1}
                             onClick={() => onReorderActivity(act.id, 'down')}
                             className="p-1 text-[#64748B] hover:text-[#17243A] disabled:opacity-20 cursor-pointer"
-                            title="Bajar"
+                            title="Bajar orden"
                           >
                             <ArrowDown className="w-3 h-3" />
                           </button>
@@ -755,7 +743,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                             type="button"
                             onClick={() => onRemoveActivity(act.id)}
                             className="p-1 text-[#64748B] hover:text-rose-600 cursor-pointer"
-                            title="Quitar"
+                            title="Quitar actividad"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -787,21 +775,9 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
               Lugares para visitar
             </h2>
             <span className="text-xs text-[#64748B]">
-              Lista de deseos sin día asignado ({savedPlaces.length})
+              Lista de deseos sin día asignado (<strong className="text-[#D97706]">{savedPlaces.length}</strong> lugares)
             </span>
           </div>
-
-          {onToggleMapCollapse && (
-            <button
-              type="button"
-              onClick={onToggleMapCollapse}
-              className="hidden lg:flex items-center gap-1 text-[11px] font-medium text-[#64748B] hover:text-[#17243A] px-2 py-1 bg-[#F7F8FA] rounded-md border border-[#E9EEF4] cursor-pointer"
-              title={isMapCollapsed ? 'Ver mapa lateral' : 'Contraer mapa'}
-            >
-              <MapIcon className="w-3 h-3 text-[#E85B49]" />
-              <span>{isMapCollapsed ? 'Ver mapa' : 'Ocultar mapa'}</span>
-            </button>
-          )}
         </div>
 
         {savedPlaces.length === 0 ? (
@@ -813,17 +789,24 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             {savedPlaces.map((place) => (
               <div
                 key={place.id}
-                className="p-3 bg-white border border-[#E9EEF4] rounded-xl flex items-center justify-between gap-3 shadow-2xs"
+                className="p-3 bg-white border border-[#E9EEF4] rounded-xl flex items-center justify-between gap-3 shadow-2xs hover:border-slate-300 transition-colors"
               >
-                <div className="flex items-center gap-2.5 truncate">
-                  <img
-                    src={place.images[0]?.url || ''}
-                    alt={place.name}
-                    referrerPolicy="no-referrer"
-                    className="w-10 h-10 rounded-lg object-cover shrink-0 bg-slate-100"
-                  />
+                <div
+                  className="flex items-center gap-2.5 truncate cursor-pointer flex-1"
+                  onClick={() => onSelectPlace(place)}
+                >
+                  <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-slate-100">
+                    <PlaceImage
+                      src={place.images[0]?.url}
+                      alt={place.name}
+                      category={place.category}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
                   <div className="truncate">
-                    <div className="text-xs font-bold text-[#17243A] truncate">{place.name}</div>
+                    <div className="text-xs font-bold text-[#17243A] truncate hover:text-[#E85B49]">
+                      {place.name}
+                    </div>
                     <div className="text-[11px] text-[#64748B] capitalize">{place.category}</div>
                   </div>
                 </div>
@@ -874,31 +857,18 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             Notas y recordatorios
           </h2>
           <span className="text-xs text-[#64748B]">
-            Apunta datos importantes de reservas, contactos y consejos
+            Apunta datos de reservas, contactos y consejos para tu estadía en {trip.destinationName}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-[#64748B] font-medium bg-[#F7F8FA] px-2 py-0.5 rounded border border-[#E9EEF4]">
-            Autoguardado
-          </span>
-          {onToggleMapCollapse && (
-            <button
-              type="button"
-              onClick={onToggleMapCollapse}
-              className="hidden lg:flex items-center gap-1 text-[11px] font-medium text-[#64748B] hover:text-[#17243A] px-2 py-1 bg-[#F7F8FA] rounded-md border border-[#E9EEF4] cursor-pointer"
-              title={isMapCollapsed ? 'Ver mapa lateral' : 'Contraer mapa'}
-            >
-              <MapIcon className="w-3 h-3 text-[#E85B49]" />
-              <span>{isMapCollapsed ? 'Ver mapa' : 'Ocultar mapa'}</span>
-            </button>
-          )}
-        </div>
+        <span className="text-[10px] text-[#64748B] font-medium bg-[#F7F8FA] px-2 py-0.5 rounded border border-[#E9EEF4]">
+          Autoguardado
+        </span>
       </div>
 
       <textarea
         value={trip.notes || ''}
         onChange={(e) => onUpdateNotes(e.target.value)}
-        placeholder="Escribe consejos, contactos de choferes locales, reservas de hotel o recomendaciones gastronómicas en La Libertad..."
+        placeholder={`Escribe consejos, contactos locales, números de reserva o detalles de transporte en ${trip.destinationName}...`}
         className="w-full flex-1 p-4 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl resize-none text-[#17243A] leading-relaxed focus:outline-none focus:border-[#17243A]"
       />
     </div>

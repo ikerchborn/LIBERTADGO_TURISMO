@@ -17,6 +17,7 @@ interface WorkspaceSidebarProps {
   onSelectSection: (section: WorkspaceSection) => void;
   selectedDayNumber: number | null;
   onSelectDayNumber: (day: number | null) => void;
+  totalPlacesCount?: number;
 }
 
 export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
@@ -25,6 +26,7 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   onSelectSection,
   selectedDayNumber,
   onSelectDayNumber,
+  totalPlacesCount,
 }) => {
   const dayItems = generateDayList(trip.startDate, trip.totalDays);
   const savedCount = trip.savedPlaceIds?.length || 0;
@@ -194,8 +196,19 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           >
             <div className="flex items-center gap-2">
               <Search className="w-4 h-4 opacity-80" />
-              <span>Explorar {trip.destinationName}</span>
+              <span>Explorar</span>
             </div>
+            {totalPlacesCount !== undefined && totalPlacesCount > 0 && (
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                  activeSection === 'explore'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-[#F7F8FA] text-[#64748B] border border-[#E9EEF4]'
+                }`}
+              >
+                {totalPlacesCount}
+              </span>
+            )}
           </button>
 
           <button

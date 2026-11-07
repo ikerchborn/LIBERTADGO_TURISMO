@@ -22,7 +22,7 @@ export const TripBanner: React.FC<TripBannerProps> = ({
       {/* Cover Image with measured scrim */}
       <div className="relative h-48 md:h-56 w-full overflow-hidden">
         <img
-          src={trip.coverImage || '/assets/aistudio/Captura_de_pantalla_2026-11-06_114428_29ab2ca8.png'}
+          src={trip.coverImage || 'https://images.unsplash.com/photo-1580619305218-8423a7ef79b4?auto=format&fit=crop&w=1200&q=80'}
           alt={`Destino ${trip.destinationName}`}
           referrerPolicy="no-referrer"
           className="w-full h-full object-cover object-center filter brightness-90 transition-transform duration-700 hover:scale-105"

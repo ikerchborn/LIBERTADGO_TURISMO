@@ -57,7 +57,7 @@ export const LA_LIBERTAD_LOCALITIES: Locality[] = [
     isPriority: true,
     description: 'La Ciudad de la Eterna Primavera, centro histórico monumental, gastronomía norteña y cuna de la Marinera.',
     highlights: ['Plaza Mayor', 'Catedral de Trujillo', 'El Rincón de Vallejo', 'Casonas Coloniales'],
-    heroImage: '/assets/aistudio/Captura_de_pantalla_2026-11-06_114428_29ab2ca8.png',
+    heroImage: 'https://images.unsplash.com/photo-1580619305218-8423a7ef79b4?auto=format&fit=crop&w=1200&q=80',
   },
   {
     id: 'huanchaco',

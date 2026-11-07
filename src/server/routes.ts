@@ -1,8 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { catalogRepository } from './repository.ts';
 import { CreateTripSchema } from './schemas.ts';
+import { authRouter } from './authRoutes.ts';
+import { creatorsRouter } from './creatorsRoutes.ts';
+import { adminRouter } from './adminRoutes.ts';
+import { authMiddleware } from './authService.ts';
 
 export const apiRouter = Router();
+
+// Apply auth token parser across all /api routes
+apiRouter.use(authMiddleware);
+
+// Mount Creators & Auth Sub-Routers
+apiRouter.use('/auth', authRouter);
+apiRouter.use('/creators', creatorsRouter);
+apiRouter.use('/admin', adminRouter);
 
 // GET /api/destinations
 apiRouter.get('/destinations', (_req: Request, res: Response) => {
@@ -62,6 +74,24 @@ apiRouter.get('/places/search', (req: Request, res: Response) => {
     data: places,
     total: places.length,
   });
+});
+
+// GET /api/places/:id/videos - Approved videos associated with a specific place
+apiRouter.get('/places/:id/videos', async (req: Request, res: Response) => {
+  try {
+    const { getCreatorsRepository } = await import('./repositories/index.ts');
+    const repo = getCreatorsRepository();
+    const videos = await repo.getVideosForPlace(req.params.id);
+    res.json({
+      success: true,
+      data: videos,
+      total: videos.length,
+      placeId: req.params.id,
+    });
+  } catch (err) {
+    console.error('[Places Error] Error getting place videos:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar videos del lugar' });
+  }
 });
 
 // GET /api/places/:id

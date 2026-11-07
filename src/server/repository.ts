@@ -280,7 +280,7 @@ class CatalogRepository {
 
   public addSubmission(
     campaignId: string,
-    submissionData: Omit<CampaignSubmission, 'id' | 'submittedAt' | 'votesCount' | 'viewsCount' | 'status'>
+    submissionData: Omit<CampaignSubmission, 'id' | 'campaignId' | 'submittedAt' | 'votesCount' | 'viewsCount' | 'status'>
   ): { submission?: CampaignSubmission; error?: string } {
     const campaign = this.campaigns.get(campaignId);
     if (!campaign) {
