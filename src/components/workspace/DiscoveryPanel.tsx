@@ -357,26 +357,42 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
                 </div>
 
                 {/* Day selector popdown */}
-                {isDaySelectorOpen && !activity && (
+                {isDaySelectorOpen && (
                   <div
                     className="px-3 pb-3 pt-1 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-1.5 animate-in fade-in"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <span className="text-[11px] text-slate-600 font-medium">Asignar a:</span>
-                    <div className="flex items-center gap-1">
-                      {Array.from({ length: trip.totalDays }).map((_, i) => (
-                        <button
-                          key={i + 1}
-                          type="button"
-                          onClick={() => {
-                            onAddPlaceToDay(place, i + 1);
-                            setActiveDaySelectorPlaceId(null);
-                          }}
-                          className="text-[10px] px-2 py-1 bg-white hover:bg-[#E05A47] hover:text-white border border-slate-200 text-slate-700 font-mono font-semibold rounded cursor-pointer transition-colors"
-                        >
-                          Día {i + 1}
-                        </button>
-                      ))}
+                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                      {Array.from({ length: trip.totalDays }).map((_, i) => {
+                        const dayNum = i + 1;
+                        const inThisDay = trip.activities.some(
+                          (a) => a.placeId === place.id && a.dayNumber === dayNum
+                        );
+                        return (
+                          <button
+                            key={dayNum}
+                            type="button"
+                            onClick={() => {
+                              if (inThisDay) {
+                                const act = trip.activities.find(
+                                  (a) => a.placeId === place.id && a.dayNumber === dayNum
+                                );
+                                if (act && onRemoveActivity) onRemoveActivity(act.id);
+                              } else {
+                                onAddPlaceToDay(place, dayNum);
+                              }
+                            }}
+                            className={`text-[10px] px-2 py-1 font-mono font-semibold rounded cursor-pointer transition-colors ${
+                              inThisDay
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                : 'bg-white hover:bg-[#E05A47] hover:text-white border border-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {inThisDay ? `✓ D${dayNum}` : `D${dayNum}`}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

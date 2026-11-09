@@ -34,6 +34,11 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { PlaceImage } from '../common/PlaceImage.tsx';
+import {
+  FILTER_CATEGORIES,
+  matchesCategory,
+  matchesSearchQuery,
+} from '../../utils/filterUtils.ts';
 
 interface MapPanelProps {
   trip: TripItinerary;
@@ -48,6 +53,10 @@ interface MapPanelProps {
   onToggleCollapse?: () => void;
   mobileTab?: 'content' | 'map';
   onSwitchToContent?: () => void;
+  selectedCategory?: string;
+  onCategoryChange?: (category: string) => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
 }
 
 // Categorías del catálogo con iconos y colores representativos
@@ -60,16 +69,6 @@ const CATEGORY_STYLES: Record<string, { bg: string; icon: string; label: string 
   atractivos: { bg: '#059669', icon: '⭐', label: 'Atractivos' },
   hoteles: { bg: '#4338CA', icon: '🏨', label: 'Hoteles' },
 };
-
-const FILTER_CATEGORIES: { id: string; label: string; icon: string }[] = [
-  { id: 'todas', label: 'Todos', icon: '✨' },
-  { id: 'restaurantes', label: 'Restaurantes', icon: '🍴' },
-  { id: 'atractivos', label: 'Atracciones', icon: '⭐' },
-  { id: 'arqueologia', label: 'Arqueología', icon: '🏛️' },
-  { id: 'playas', label: 'Playas', icon: '🌊' },
-  { id: 'museos', label: 'Museos', icon: '🎨' },
-  { id: 'hoteles', label: 'Hoteles', icon: '🏨' },
-];
 
 export const MapPanel: React.FC<MapPanelProps> = ({
   trip,
@@ -84,6 +83,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   onToggleCollapse,
   mobileTab = 'content',
   onSwitchToContent,
+  selectedCategory = 'todas',
+  onCategoryChange,
+  searchQuery = '',
+  onSearchChange,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
@@ -95,8 +98,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const [showRoutes, setShowRoutes] = useState<boolean>(true);
 
   // Estados de Búsqueda y Filtros tipo Google Maps
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('todas');
   const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
   const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState<boolean>(false);
   const [onlySavedFilter, setOnlySavedFilter] = useState<boolean>(false);
@@ -115,7 +116,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   // Estado de Ficha Inferior (Bottom Sheet expandible)
   const [isCardExpanded, setIsCardExpanded] = useState<boolean>(false);
   const [quickDayPickerOpen, setQuickDayPickerOpen] = useState<boolean>(false);
+  const [selectedDayToAssign, setSelectedDayToAssign] = useState<number>(1);
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+
+  // Cerrar selector al cambiar de lugar
+  useEffect(() => {
+    setQuickDayPickerOpen(false);
+    setIsCardExpanded(false);
+  }, [selectedPlace?.id]);
 
   const destinationLocality: Locality | undefined = getLocality(trip.destinationId);
   const centerLat = destinationLocality?.coordinates.lat || -8.1118;
@@ -128,26 +136,31 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     return generateDayList(trip.startDate, trip.totalDays);
   }, [trip.startDate, trip.totalDays]);
 
+  // Sincronizar el día predeterminado al abrir el selector
+  useEffect(() => {
+    if (quickDayPickerOpen && selectedPlace) {
+      if (selectedDayNumber && selectedDayNumber >= 1 && selectedDayNumber <= trip.totalDays) {
+        setSelectedDayToAssign(selectedDayNumber);
+      } else {
+        const firstAvailable = dayItems.find(
+          (d) => !trip.activities.some((a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber)
+        );
+        setSelectedDayToAssign(firstAvailable ? firstAvailable.dayNumber : 1);
+      }
+    }
+  }, [quickDayPickerOpen, selectedPlace, selectedDayNumber, trip.totalDays, dayItems, trip.activities]);
+
   // Lugares filtrados reactivamente
   const filteredPlaces = useMemo(() => {
     return places.filter((p) => {
-      // 1. Filtro por categoría principal
-      if (selectedCategory !== 'todas' && p.category !== selectedCategory) {
+      // 1. Filtro por categoría principal unificado
+      if (!matchesCategory(p.category, selectedCategory)) {
         return false;
       }
 
-      // 2. Filtro de búsqueda por texto (nombre, dirección, tags, subcategoría)
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchesName = p.name.toLowerCase().includes(q);
-        const matchesCategory = p.category.toLowerCase().includes(q);
-        const matchesSubcat = p.subcategory?.toLowerCase().includes(q);
-        const matchesAddress = p.address.toLowerCase().includes(q);
-        const matchesTags = p.tags.some((t) => t.toLowerCase().includes(q));
-
-        if (!matchesName && !matchesCategory && !matchesSubcat && !matchesAddress && !matchesTags) {
-          return false;
-        }
+      // 2. Filtro de búsqueda por texto unificado (sin acentos, en todos los campos)
+      if (!matchesSearchQuery(p, searchQuery)) {
+        return false;
       }
 
       // 3. Filtros avanzados
@@ -187,14 +200,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   // Sugerencias de búsqueda en tiempo real (Top 5)
   const searchSuggestions = useMemo(() => {
     if (!searchQuery.trim() || !isSearchFocused) return [];
-    const q = searchQuery.toLowerCase().trim();
     return places
-      .filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          p.tags.some((t) => t.toLowerCase().includes(q))
-      )
+      .filter((p) => matchesSearchQuery(p, searchQuery))
       .slice(0, 5);
   }, [places, searchQuery, isSearchFocused]);
 
@@ -733,10 +740,29 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   };
 
-  const selectedPlaceActivity = useMemo(() => {
-    if (!selectedPlace) return null;
-    return trip.activities.find((a) => a.placeId === selectedPlace.id);
+  // Alternar (toggle) asignación de un lugar a un día específico con feedback visual
+  const handleToggleDay = (place: Place, dayNumber: number) => {
+    const existingActivity = trip.activities.find(
+      (a) => a.placeId === place.id && a.dayNumber === dayNumber
+    );
+
+    if (existingActivity) {
+      if (onRemoveActivity) {
+        onRemoveActivity(existingActivity.id);
+        setFeedbackNotice(`Eliminado del Día ${dayNumber}`);
+        setTimeout(() => setFeedbackNotice(null), 2000);
+      }
+    } else {
+      handleAddPlaceWithFeedback(place, dayNumber);
+    }
+  };
+
+  const selectedPlaceActivities = useMemo(() => {
+    if (!selectedPlace) return [];
+    return trip.activities.filter((a) => a.placeId === selectedPlace.id);
   }, [selectedPlace, trip.activities]);
+
+  const selectedPlaceActivity = selectedPlaceActivities[0] || null;
 
   const isSelectedSaved = useMemo(() => {
     if (!selectedPlace) return false;
@@ -801,7 +827,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => onSearchChange?.(e.target.value)}
                 onFocus={() => setIsSearchFocused(true)}
                 placeholder="Buscar restaurantes, playas, museos..."
                 className="w-full text-xs sm:text-sm text-[#17243A] placeholder:text-[#94A3B8] bg-transparent outline-none"
@@ -810,7 +836,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => onSearchChange?.('')}
                   className="p-1 text-[#94A3B8] hover:text-[#17243A] cursor-pointer"
                   title="Limpiar búsqueda"
                 >
@@ -851,7 +877,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                         key={sug.id}
                         onMouseDown={() => {
                           onSelectPlace(sug);
-                          setSearchQuery(sug.name);
+                          onSearchChange?.(sug.name);
                           setIsSearchFocused(false);
                           mapInstanceRef.current?.flyTo({
                             center: [sug.coordinates.lng, sug.coordinates.lat],
@@ -894,7 +920,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 <button
                   key={cat.id}
                   type="button"
-                  onClick={() => setSelectedCategory(cat.id)}
+                  onClick={() => onCategoryChange?.(cat.id)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
                     isActive
                       ? 'bg-[#17243A] text-white ring-2 ring-[#17243A]/20'
@@ -958,8 +984,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedCategory('todas');
-                  setSearchQuery('');
+                  onCategoryChange?.('todas');
+                  onSearchChange?.('');
                   setOnlySavedFilter(false);
                   setMinRatingFilter(0);
                   setOnlyMinceturFilter(false);
@@ -1087,7 +1113,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     )}
                   </div>
 
-                  {/* Asignación directa a días del viaje */}
+                  {/* Asignación directa a días del viaje con toggle independiente */}
                   <div className="pt-3 border-t border-[#E9EEF4] space-y-2">
                     <span className="text-xs font-bold text-[#17243A] block">
                       Organizar en el Itinerario:
@@ -1101,27 +1127,15 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                           <button
                             key={d.dayNumber}
                             type="button"
-                            onClick={() => {
-                              if (inThisDay) {
-                                const act = trip.activities.find(
-                                  (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                                );
-                                if (act && onRemoveActivity) {
-                                  onRemoveActivity(act.id);
-                                  setFeedbackNotice(`Eliminado del Día ${d.dayNumber}`);
-                                  setTimeout(() => setFeedbackNotice(null), 2000);
-                                }
-                              } else {
-                                handleAddPlaceWithFeedback(selectedPlace, d.dayNumber);
-                              }
-                            }}
+                            onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
                             className={`p-2 rounded-xl text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer ${
                               inThisDay
-                                ? 'bg-emerald-600 text-white shadow-xs'
+                                ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
                                 : 'bg-[#F8FAFC] text-[#17243A] hover:bg-[#E85B49] hover:text-white border border-[#E2E8F0]'
                             }`}
+                            title={inThisDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
                           >
-                            <span>Día {d.dayNumber}</span>
+                            <span>{inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}</span>
                             <span className="text-[10px] font-normal opacity-80">{d.weekdayShort}</span>
                           </button>
                         );
@@ -1160,9 +1174,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 text-[10px] text-[#64748B] uppercase font-semibold">
                           <span>{selectedPlace.category}</span>
-                          {selectedPlaceActivity && (
+                          {selectedPlaceActivities.length > 0 && (
                             <span className="text-[#E85B49] font-bold">
-                              · Día {selectedPlaceActivity.dayNumber}
+                              · {selectedPlaceActivities.map((a) => `Día ${a.dayNumber}`).join(', ')}
                             </span>
                           )}
                         </div>
@@ -1234,61 +1248,29 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       </button>
                     )}
 
-                    {/* Botón Añadir a mi viaje / Selector rápido de día */}
-                    <div className="flex items-center gap-1.5">
-                      {selectedPlaceActivity ? (
-                        <div className="flex items-center gap-1">
-                          <span className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg">
-                            ✓ En Día {selectedPlaceActivity.dayNumber}
-                          </span>
-                          {onRemoveActivity && (
-                            <button
-                              type="button"
-                              onClick={() => onRemoveActivity(selectedPlaceActivity.id)}
-                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              title="Quitar del itinerario"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="relative">
+                    {/* Botones de asignación de días con toggle independiente */}
+                    <div className="flex-1 flex items-center justify-end gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5">
+                      <span className="text-[11px] text-[#64748B] shrink-0 font-medium">Añadir a:</span>
+                      {dayItems.map((d) => {
+                        const inThisDay = trip.activities.some(
+                          (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                        );
+                        return (
                           <button
+                            key={d.dayNumber}
                             type="button"
-                            onClick={() => setQuickDayPickerOpen(!quickDayPickerOpen)}
-                            className="px-3 py-1.5 text-xs font-semibold text-white bg-[#E85B49] hover:bg-[#D94C3A] active:scale-95 rounded-lg transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                            onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                            className={`px-2.5 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 transition-all cursor-pointer ${
+                              inThisDay
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
+                                : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 shadow-2xs'
+                            }`}
+                            title={inThisDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
                           >
-                            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                            <span>Añadir a mi viaje</span>
+                            {inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
                           </button>
-
-                          {/* Popover selector de día */}
-                          {quickDayPickerOpen && (
-                            <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-lg border border-[#E2E8F0] p-2 z-40 w-44 animate-in fade-in zoom-in-95 duration-100">
-                              <span className="text-[11px] font-bold text-[#17243A] block mb-1.5">
-                                Selecciona el día:
-                              </span>
-                              <div className="space-y-1">
-                                {dayItems.map((d) => (
-                                  <button
-                                    key={d.dayNumber}
-                                    type="button"
-                                    onClick={() => {
-                                      handleAddPlaceWithFeedback(selectedPlace, d.dayNumber);
-                                      setQuickDayPickerOpen(false);
-                                    }}
-                                    className="w-full text-left px-2 py-1 text-xs text-[#17243A] hover:bg-[#F8FAFC] rounded-md font-mono flex items-center justify-between cursor-pointer"
-                                  >
-                                    <span>{d.label}</span>
-                                    <span className="text-[10px] text-[#64748B]">{d.weekdayShort}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -1391,7 +1373,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => setSelectedCategory(c.id)}
+                    onClick={() => onCategoryChange?.(c.id)}
                     className={`px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer ${
                       selectedCategory === c.id
                         ? 'bg-[#17243A] text-white font-semibold'
@@ -1472,7 +1454,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedCategory('todas');
+                  onCategoryChange?.('todas');
+                  onSearchChange?.('');
                   setOnlySavedFilter(false);
                   setMinRatingFilter(0);
                   setOnlyMinceturFilter(false);
@@ -1489,6 +1472,173 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               >
                 Aplicar filtros ({filteredPlaces.length})
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* BOTTOM SHEET SELECTOR DE DÍA (EXCLUSIVO MOBILE - md:hidden) */}
+      {/* ============================================================ */}
+      {quickDayPickerOpen && selectedPlace && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex flex-col justify-end md:hidden animate-in fade-in duration-200"
+          onClick={() => setQuickDayPickerOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mobile-day-picker-title"
+        >
+          <div
+            className="w-full bg-white rounded-t-3xl shadow-2xl border-t border-[#E2E8F0] flex flex-col max-h-[85dvh] overflow-hidden animate-in slide-in-from-bottom duration-250 select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Tirador táctil superior */}
+            <div className="w-12 h-1 bg-slate-300 rounded-full mx-auto my-2.5 shrink-0" />
+
+            {/* Encabezado fijo */}
+            <div className="flex items-center justify-between px-5 pb-3 border-b border-[#F1F5F9] shrink-0">
+              <div className="min-w-0 pr-3">
+                <h3 id="mobile-day-picker-title" className="text-base font-bold text-[#17243A] font-display">
+                  Selecciona el día
+                </h3>
+                <p className="text-xs text-[#64748B] truncate mt-0.5">
+                  {selectedPlace.name} · {selectedPlace.category}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickDayPickerOpen(false)}
+                className="p-2 text-slate-400 hover:text-[#17243A] hover:bg-slate-100 rounded-full transition-colors cursor-pointer shrink-0"
+                title="Cerrar selector"
+                aria-label="Cerrar selector"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Lista vertical desplazable con altura máxima contenida */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2.5 max-h-[50dvh] overscroll-contain pb-4">
+              {dayItems.map((d) => {
+                const isSelected = selectedDayToAssign === d.dayNumber;
+                const isAlreadyIn = trip.activities.some(
+                  (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                );
+                const dayActCount = trip.activities.filter(
+                  (a) => a.dayNumber === d.dayNumber
+                ).length;
+
+                return (
+                  <div
+                    key={d.dayNumber}
+                    onClick={() => {
+                      setSelectedDayToAssign(d.dayNumber);
+                      handleToggleDay(selectedPlace, d.dayNumber);
+                    }}
+                    className={`w-full flex items-center justify-between p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                      isAlreadyIn
+                        ? 'border-emerald-300 bg-emerald-50/70 hover:bg-emerald-100/70 ring-1 ring-emerald-400/30'
+                        : isSelected
+                        ? 'border-[#E85B49] bg-[#E85B49]/5 ring-2 ring-[#E85B49]/20 shadow-xs'
+                        : 'border-[#E2E8F0] bg-[#F8FAFC] hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {/* Badge con número de día */}
+                      <div
+                        className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center font-bold shrink-0 transition-colors ${
+                          isAlreadyIn
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : isSelected
+                            ? 'bg-[#E85B49] text-white shadow-xs'
+                            : 'bg-white border border-[#E2E8F0] text-[#17243A]'
+                        }`}
+                      >
+                        <span className="text-[9px] uppercase tracking-wider leading-none">Día</span>
+                        <span className="text-sm font-extrabold leading-tight">{d.dayNumber}</span>
+                      </div>
+
+                      {/* Detalles del día (Número, fecha y día de la semana) */}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold text-[#17243A]">
+                            {isAlreadyIn ? `✓ ${d.label}` : d.label}
+                          </span>
+                          <span className="text-xs text-[#64748B] font-medium capitalize">
+                            · {d.weekdayShort}
+                          </span>
+                        </div>
+                        <div className="text-xs text-[#64748B] flex items-center gap-1.5 mt-0.5">
+                          <span>{d.formattedDate}</span>
+                          {dayActCount > 0 && (
+                            <>
+                              <span className="text-slate-300">•</span>
+                              <span>{dayActCount} {dayActCount === 1 ? 'actividad' : 'actividades'}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Indicador de selección táctil */}
+                    <div className="shrink-0 pl-2">
+                      {isAlreadyIn ? (
+                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          <span>Asignado</span>
+                        </span>
+                      ) : (
+                        <div className="w-6 h-6 rounded-full border-2 border-slate-300" />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Pie fijo con botón de confirmación y cancelación */}
+            <div className="p-4 border-t border-[#F1F5F9] bg-white flex flex-col gap-2 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {(() => {
+                const isSelectedDayAlreadyIn = trip.activities.some(
+                  (a) => a.placeId === selectedPlace.id && a.dayNumber === selectedDayToAssign
+                );
+
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleToggleDay(selectedPlace, selectedDayToAssign);
+                        setQuickDayPickerOpen(false);
+                      }}
+                      className={`w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer ${
+                        isSelectedDayAlreadyIn
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                          : 'bg-[#E85B49] hover:bg-[#D94C3A] active:scale-[0.98] text-white'
+                      }`}
+                    >
+                      {isSelectedDayAlreadyIn ? (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          <span>Quitar del Día {selectedDayToAssign}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4 stroke-[2.5]" />
+                          <span>Añadir al Día {selectedDayToAssign}</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setQuickDayPickerOpen(false)}
+                      className="w-full py-2 text-xs font-semibold text-[#64748B] hover:text-[#17243A] text-center cursor-pointer transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

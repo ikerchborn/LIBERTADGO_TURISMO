@@ -22,6 +22,11 @@ import { Place, PlaceCategory, TripItinerary } from '../../types/catalog.ts';
 import { generateDayList, TripDayItem } from '../../utils/dateUtils.ts';
 import { WorkspaceSection } from './WorkspaceSidebar.tsx';
 import { PlaceImage } from '../common/PlaceImage.tsx';
+import {
+  FILTER_CATEGORIES,
+  matchesCategory,
+  matchesSearchQuery,
+} from '../../utils/filterUtils.ts';
 
 interface WorkspaceContentProps {
   trip: TripItinerary;
@@ -41,17 +46,11 @@ interface WorkspaceContentProps {
   isMapCollapsed?: boolean;
   previousSection?: WorkspaceSection | null;
   onReturnToPreviousSection?: () => void;
+  selectedCategory?: string;
+  onCategoryChange?: (category: string) => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
 }
-
-const CATEGORIES: { id: PlaceCategory | 'todas'; label: string }[] = [
-  { id: 'todas', label: 'Todo' },
-  { id: 'restaurantes', label: 'Restaurantes' },
-  { id: 'arqueologia', label: 'Arqueología' },
-  { id: 'playas', label: 'Playas' },
-  { id: 'atractivos', label: 'Atractivos' },
-  { id: 'hoteles', label: 'Hoteles' },
-  { id: 'museos', label: 'Museos' },
-];
 
 export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   trip,
@@ -71,10 +70,12 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   isMapCollapsed = false,
   previousSection,
   onReturnToPreviousSection,
+  selectedCategory = 'todas',
+  onCategoryChange,
+  searchQuery = '',
+  onSearchChange,
 }) => {
-  // Búsqueda y categoría para Explorar
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('todas');
+  // Selector de día en ficha de tarjeta
   const [activeDayPickerPlaceId, setActiveDayPickerPlaceId] = useState<string | null>(null);
 
   // Formulario de actividad manual
@@ -96,18 +97,25 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
     return generateDayList(trip.startDate, trip.totalDays);
   }, [trip.startDate, trip.totalDays]);
 
-  // Filtrado de lugares
+  // Alternar (toggle) asignación de un lugar a un día específico
+  const handleToggleDay = (place: Place, dayNumber: number) => {
+    const existingActivity = trip.activities.find(
+      (a) => a.placeId === place.id && a.dayNumber === dayNumber
+    );
+
+    if (existingActivity) {
+      if (onRemoveActivity) {
+        onRemoveActivity(existingActivity.id);
+      }
+    } else {
+      onAddPlaceToDay(place, dayNumber);
+    }
+  };
+
+  // Filtrado de lugares sincronizado con catálogo y mapa
   const filteredPlaces = useMemo(() => {
     return places.filter((p) => {
-      const matchesCat = selectedCategory === 'todas' || p.category === selectedCategory;
-      const q = searchQuery.toLowerCase().trim();
-      const matchesQuery =
-        !q ||
-        p.name.toLowerCase().includes(q) ||
-        p.shortDescription.toLowerCase().includes(q) ||
-        p.address.toLowerCase().includes(q) ||
-        p.tags.some((t) => t.toLowerCase().includes(q));
-      return matchesCat && matchesQuery;
+      return matchesCategory(p.category, selectedCategory) && matchesSearchQuery(p, searchQuery);
     });
   }, [places, selectedCategory, searchQuery]);
 
@@ -245,9 +253,9 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
               <h2 className="text-base sm:text-lg font-bold font-display text-[#17243A] tracking-tight leading-snug">
                 Explorar {trip.destinationName}
               </h2>
-              {/* Contador de resultados con menor protagonismo */}
+              {/* Contador real de resultados */}
               <p className="text-xs text-[#64748B] mt-0.5">
-                {filteredPlaces.length} de {places.length} experiencias disponibles
+                Mostrando {filteredPlaces.length} de {places.length} lugares disponibles
               </p>
             </div>
 
@@ -270,14 +278,14 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => onSearchChange?.(e.target.value)}
               placeholder={`Buscar en ${trip.destinationName} (ceviche, huacas, surf, museos)...`}
               className="w-full h-11 sm:h-10 pl-10 pr-9 text-xs sm:text-sm bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#17243A] placeholder:text-[#94A3B8] focus:bg-white focus:outline-none focus:border-[#E85B49] focus:ring-2 focus:ring-[#E85B49]/15 transition-all shadow-2xs"
             />
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
+                onClick={() => onSearchChange?.('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
                 title="Limpiar búsqueda"
               >
@@ -288,18 +296,19 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
           {/* Separación visual y Chips de Categorías deslizables */}
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth pt-0.5 pb-0.5">
-            {CATEGORIES.map((cat) => (
+            {FILTER_CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
                 type="button"
-                onClick={() => setSelectedCategory(cat.id)}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer shrink-0 font-medium ${
+                onClick={() => onCategoryChange?.(cat.id)}
+                className={`px-3 py-1.5 text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer shrink-0 font-medium flex items-center gap-1.5 ${
                   selectedCategory === cat.id
                     ? 'bg-[#17243A] text-white shadow-xs font-semibold'
                     : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/80'
                 }`}
               >
-                {cat.label}
+                <span>{cat.icon}</span>
+                <span>{cat.label}</span>
               </button>
             ))}
           </div>
@@ -424,14 +433,13 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                         <button
                           key={d.dayNumber}
                           type="button"
-                          disabled={isAlreadyInDay}
-                          onClick={() => onAddPlaceToDay(selectedPlace, d.dayNumber)}
-                          className={`px-3 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 transition-all ${
+                          onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                          className={`px-3 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 transition-all cursor-pointer ${
                             isAlreadyInDay
-                              ? 'bg-emerald-600 text-white cursor-default opacity-95'
-                              : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 cursor-pointer shadow-2xs'
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
+                              : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 shadow-2xs'
                           }`}
-                          title={isAlreadyInDay ? `Ya está en Día ${d.dayNumber}` : `Añadir a Día ${d.dayNumber}`}
+                          title={isAlreadyInDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
                         >
                           {isAlreadyInDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
                         </button>
@@ -448,7 +456,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             <div className={`grid grid-cols-1 ${isMapCollapsed ? 'md:grid-cols-2 xl:grid-cols-3' : ''} gap-3`}>
               {filteredPlaces.map((place) => {
                 const isSaved = trip.savedPlaceIds?.includes(place.id);
-                const activity = trip.activities.find((a) => a.placeId === place.id);
+                const placeActivities = trip.activities.filter((a) => a.placeId === place.id);
                 const isDayPickerOpen = activeDayPickerPlaceId === place.id;
 
                 return (
@@ -475,9 +483,9 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                               <h4 className="text-xs sm:text-sm font-bold text-[#17243A] group-hover:text-[#E85B49] transition-colors leading-snug line-clamp-1">
                                 {place.name}
                               </h4>
-                              {activity && (
+                              {placeActivities.length > 0 && (
                                 <span className="text-[10px] font-semibold text-white bg-[#E85B49] px-1.5 py-0.2 rounded shrink-0 leading-tight">
-                                  Día {activity.dayNumber}
+                                  {placeActivities.map((a) => `Día ${a.dayNumber}`).join(', ')}
                                 </span>
                               )}
                             </div>
@@ -527,15 +535,19 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                         <button
                           type="button"
                           onClick={() => setActiveDayPickerPlaceId(isDayPickerOpen ? null : place.id)}
-                          className="px-2.5 py-1 text-xs font-semibold text-[#17243A] hover:text-white hover:bg-[#17243A] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                          className={`px-2.5 py-1 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors cursor-pointer ${
+                            placeActivities.length > 0
+                              ? 'text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100'
+                              : 'text-[#17243A] hover:text-white hover:bg-[#17243A] bg-[#F8FAFC] border border-[#E2E8F0]'
+                          }`}
                         >
-                          <span>+ Añadir</span>
+                          <span>{placeActivities.length > 0 ? 'Días' : '+ Añadir'}</span>
                           <ChevronRight className="w-3 h-3 opacity-60" />
                         </button>
                       </div>
                     </div>
 
-                    {/* Selector emergente de día asignable */}
+                    {/* Selector emergente de día asignable (con toggle independiente) */}
                     {isDayPickerOpen && (
                       <div
                         className="mt-2.5 pt-2.5 border-t border-[#E9EEF4] flex items-center justify-between text-xs animate-in fade-in duration-100"
@@ -543,19 +555,26 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                       >
                         <span className="text-[#64748B] text-[11px] font-medium">Asignar a:</span>
                         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth">
-                          {dayItems.map((d) => (
-                            <button
-                              key={d.dayNumber}
-                              type="button"
-                              onClick={() => {
-                                onAddPlaceToDay(place, d.dayNumber);
-                                setActiveDayPickerPlaceId(null);
-                              }}
-                              className="px-2.5 py-1 bg-[#F8FAFC] hover:bg-[#17243A] hover:text-white border border-[#E2E8F0] text-[#17243A] font-mono font-medium text-[11px] rounded-lg cursor-pointer transition-colors"
-                            >
-                              D{d.dayNumber}
-                            </button>
-                          ))}
+                          {dayItems.map((d) => {
+                            const isAlreadyInDay = trip.activities.some(
+                              (a) => a.placeId === place.id && a.dayNumber === d.dayNumber
+                            );
+                            return (
+                              <button
+                                key={d.dayNumber}
+                                type="button"
+                                onClick={() => handleToggleDay(place, d.dayNumber)}
+                                className={`px-2.5 py-1 font-mono font-medium text-[11px] rounded-lg cursor-pointer transition-colors ${
+                                  isAlreadyInDay
+                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
+                                    : 'bg-[#17243A] text-white hover:bg-[#E85B49] border border-[#17243A]'
+                                }`}
+                                title={isAlreadyInDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
+                              >
+                                {isAlreadyInDay ? `✓ D${d.dayNumber}` : `D${d.dayNumber}`}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -565,8 +584,24 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             </div>
 
             {filteredPlaces.length === 0 && (
-              <div className="text-center py-12 px-4 border border-dashed border-[#E9EEF4] rounded-xl text-xs text-[#64748B] bg-white">
-                No se encontraron lugares en {trip.destinationName} para este filtro.
+              <div className="text-center py-12 px-4 border border-dashed border-[#E9EEF4] rounded-xl text-xs text-[#64748B] bg-white flex flex-col items-center justify-center gap-2.5">
+                <Compass className="w-8 h-8 text-slate-300 stroke-[1.5]" />
+                <div>
+                  <p className="font-semibold text-slate-700 text-sm">No se encontraron lugares</p>
+                  <p className="text-[#64748B] mt-0.5">
+                    No hay resultados en {trip.destinationName} para los filtros seleccionados.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onCategoryChange?.('todas');
+                    onSearchChange?.('');
+                  }}
+                  className="mt-1 px-3.5 py-1.5 bg-[#17243A] text-white text-xs font-semibold rounded-lg hover:bg-[#E85B49] transition-colors cursor-pointer"
+                >
+                  Limpiar filtros
+                </button>
               </div>
             )}
           </div>
@@ -855,16 +890,26 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                 <div className="flex items-center gap-2 shrink-0">
                   <div className="flex items-center gap-1">
                     <span className="text-[11px] text-[#64748B]">Añadir:</span>
-                    {dayItems.map((d) => (
-                      <button
-                        key={d.dayNumber}
-                        type="button"
-                        onClick={() => onAddPlaceToDay(place, d.dayNumber)}
-                        className="px-2 py-0.5 bg-[#F7F8FA] hover:bg-[#17243A] hover:text-white border border-[#E9EEF4] text-[#17243A] text-[10px] font-mono rounded cursor-pointer transition-colors"
-                      >
-                        D{d.dayNumber}
-                      </button>
-                    ))}
+                    {dayItems.map((d) => {
+                      const isAlreadyInDay = trip.activities.some(
+                        (a) => a.placeId === place.id && a.dayNumber === d.dayNumber
+                      );
+                      return (
+                        <button
+                          key={d.dayNumber}
+                          type="button"
+                          onClick={() => handleToggleDay(place, d.dayNumber)}
+                          className={`px-2 py-0.5 text-[10px] font-mono rounded cursor-pointer transition-colors ${
+                            isAlreadyInDay
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
+                              : 'bg-[#17243A] text-white hover:bg-[#E85B49] border border-[#17243A]'
+                          }`}
+                          title={isAlreadyInDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
+                        >
+                          {isAlreadyInDay ? `✓ D${d.dayNumber}` : `D${d.dayNumber}`}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   <button

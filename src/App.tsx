@@ -14,6 +14,7 @@ import { WorkspaceContent } from './components/workspace/WorkspaceContent.tsx';
 import { MapPanel } from './components/workspace/MapPanel.tsx';
 import { INITIAL_PLACES } from './data/initialPlaces.ts';
 import { TripItinerary, Place, TripActivity } from './types/catalog.ts';
+import { matchesCategory, matchesSearchQuery } from './utils/filterUtils.ts';
 
 const STORAGE_TRIPS_KEY = 'libertadgo_trips_v2';
 const STORAGE_ACTIVE_ID_KEY = 'libertadgo_active_trip_id_v2';
@@ -32,9 +33,29 @@ export default function App() {
   const [mobileTab, setMobileTab] = useState<'content' | 'map'>('content');
   const [isMapCollapsed, setIsMapCollapsed] = useState<boolean>(false);
 
+  // Synchronized catalog & map filter states
+  const [selectedCategory, setSelectedCategory] = useState<string>('todas');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
   // Places catalog state
   const [places, setPlaces] = useState<Place[]>(INITIAL_PLACES);
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
+
+  // Synchronized category change handler with detail view cleanup
+  const handleCategoryChange = (newCat: string) => {
+    setSelectedCategory(newCat);
+    if (selectedPlace && !matchesCategory(selectedPlace.category, newCat)) {
+      setSelectedPlace(null);
+    }
+  };
+
+  // Synchronized search query change handler with detail view cleanup
+  const handleSearchChange = (newQuery: string) => {
+    setSearchQuery(newQuery);
+    if (selectedPlace && newQuery.trim() && !matchesSearchQuery(selectedPlace, newQuery)) {
+      setSelectedPlace(null);
+    }
+  };
 
   // Centralized place selection handler to synchronize workspace section & map selection
   const handleSelectPlace = (place: Place | null) => {
@@ -141,6 +162,8 @@ export default function App() {
     setPreviousSection(null);
     setSelectedPlace(null);
     setSelectedDayNumber(null);
+    setSelectedCategory('todas');
+    setSearchQuery('');
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   };
 
@@ -151,6 +174,8 @@ export default function App() {
     setPreviousSection(null);
     setSelectedPlace(null);
     setSelectedDayNumber(null);
+    setSelectedCategory('todas');
+    setSearchQuery('');
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   };
 
@@ -446,6 +471,10 @@ export default function App() {
                 isMapCollapsed={isMapCollapsed}
                 previousSection={previousSection}
                 onReturnToPreviousSection={handleReturnToPreviousSection}
+                selectedCategory={selectedCategory}
+                onCategoryChange={handleCategoryChange}
+                searchQuery={searchQuery}
+                onSearchChange={handleSearchChange}
               />
             </div>
 
@@ -468,6 +497,10 @@ export default function App() {
                 onToggleCollapse={() => setIsMapCollapsed((prev) => !prev)}
                 mobileTab={mobileTab}
                 onSwitchToContent={() => setMobileTab('content')}
+                selectedCategory={selectedCategory}
+                onCategoryChange={handleCategoryChange}
+                searchQuery={searchQuery}
+                onSearchChange={handleSearchChange}
               />
             </div>
           </div>
