@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { TripItinerary } from '../../types/catalog.ts';
 import { generateDayList } from '../../utils/dateUtils.ts';
+import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
 
 export type WorkspaceSection = 'overview' | 'explore' | 'notes' | 'saved' | 'itinerary';
 
@@ -36,21 +37,40 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   const sectionButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const mobileDaysNavRef = useRef<HTMLDivElement>(null);
   const mobileDayButtonsRef = useRef<Map<number | 'all', HTMLButtonElement>>(new Map());
+  const previousSelectedDayRef = useRef<number | null | undefined>(undefined);
 
   // Scroll suave al botón de sección activo si queda fuera de vista en móvil
   useEffect(() => {
     const activeBtn = sectionButtonsRef.current.get(activeSection);
     if (activeBtn && sectionNavRef.current) {
-      activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      if (activeSection === 'itinerary' || activeSection === 'explore') {
+        sectionNavRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
     }
   }, [activeSection]);
 
   // Scroll suave al día seleccionado en móvil
   useEffect(() => {
-    const targetKey = selectedDayNumber ?? 'all';
-    const dayBtn = mobileDayButtonsRef.current.get(targetKey);
-    if (dayBtn && mobileDaysNavRef.current) {
-      dayBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    if (previousSelectedDayRef.current === undefined) {
+      previousSelectedDayRef.current = selectedDayNumber;
+      if (mobileDaysNavRef.current) {
+        mobileDaysNavRef.current.scrollTo({ left: 0, behavior: 'instant' });
+      }
+      return;
+    }
+
+    if (previousSelectedDayRef.current !== selectedDayNumber) {
+      previousSelectedDayRef.current = selectedDayNumber;
+      if (selectedDayNumber === null || selectedDayNumber === 1) {
+        mobileDaysNavRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        const dayBtn = mobileDayButtonsRef.current.get(selectedDayNumber);
+        if (dayBtn && mobileDaysNavRef.current) {
+          dayBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+      }
     }
   }, [selectedDayNumber]);
 
@@ -61,11 +81,13 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
         Barra horizontal limpia de pestañas optimizada para smartphones
       */}
       <div className="flex md:hidden flex-col w-full bg-white border-b border-[#E9EEF4] shrink-0">
-        {/* Pestañas de sección con scroll táctil fluido sin barra nativa */}
-        <div
-          ref={sectionNavRef}
-          className="flex items-center gap-1.5 overflow-x-auto flex-nowrap px-3 py-2 no-scrollbar border-b border-[#E9EEF4]/60 touch-pan-x overscroll-x-contain"
-          style={{ WebkitOverflowScrolling: 'touch' }}
+        {/* Pestañas de sección con scroll táctil fluido, degradados y flechas en desktop */}
+        <HorizontalScrollContainer
+          innerRef={sectionNavRef}
+          containerClassName="w-full border-b border-[#E9EEF4]/60"
+          className="px-3 py-2 gap-1.5"
+          gradientTheme="white"
+          ariaLabel="Secciones de navegación"
         >
           <button
             ref={(el) => {
@@ -188,14 +210,16 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
             <Compass className={`w-3.5 h-3.5 ${activeSection === 'overview' ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
             <span>Resumen</span>
           </button>
-        </div>
+        </HorizontalScrollContainer>
 
         {/* Sub-selector de días si está en itinerario */}
         {activeSection === 'itinerary' && (
-          <div
-            ref={mobileDaysNavRef}
-            className="flex items-center gap-1.5 overflow-x-auto flex-nowrap px-3 py-2 bg-[#F8FAFC] no-scrollbar border-b border-[#E9EEF4]/70 touch-pan-x overscroll-x-contain"
-            style={{ WebkitOverflowScrolling: 'touch' }}
+          <HorizontalScrollContainer
+            innerRef={mobileDaysNavRef}
+            containerClassName="w-full bg-[#F8FAFC] border-b border-[#E9EEF4]/70"
+            className="px-3 py-2 gap-1.5"
+            gradientTheme="slate"
+            ariaLabel="Días del itinerario móvil"
           >
             <button
               ref={(el) => {
@@ -230,7 +254,7 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
                 Día {d.dayNumber}
               </button>
             ))}
-          </div>
+          </HorizontalScrollContainer>
         )}
       </div>
 

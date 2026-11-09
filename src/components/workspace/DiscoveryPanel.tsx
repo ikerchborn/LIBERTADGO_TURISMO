@@ -17,6 +17,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Place, PlaceCategory, TripItinerary } from '../../types/catalog.ts';
+import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
 
 interface DiscoveryPanelProps {
   trip: TripItinerary;
@@ -104,8 +105,13 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
           />
         </div>
 
-        {/* Categories segmented scroll bar */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar">
+        {/* Categories segmented scroll bar con soporte táctil, degradados y flechas en desktop */}
+        <HorizontalScrollContainer
+          containerClassName="w-full pb-1"
+          className="gap-1"
+          gradientTheme="white"
+          ariaLabel="Categorías"
+        >
           {CATEGORIES.map((cat) => (
             <button
               key={cat.id}
@@ -121,7 +127,7 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
               <span>{cat.label}</span>
             </button>
           ))}
-        </div>
+        </HorizontalScrollContainer>
       </div>
 
       {/* Place Detail Card (When a place is selected) */}
@@ -362,8 +368,14 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
                     className="px-3 pb-3 pt-1 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-1.5 animate-in fade-in"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <span className="text-[11px] text-slate-600 font-medium">Asignar a:</span>
-                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                    <span className="text-[11px] text-slate-600 font-medium shrink-0">Asignar a:</span>
+                    <HorizontalScrollContainer
+                      containerClassName="flex-1 min-w-0"
+                      className="gap-1"
+                      gradientTheme="slate"
+                      arrowSize="sm"
+                      ariaLabel="Asignar lugar a día"
+                    >
                       {Array.from({ length: trip.totalDays }).map((_, i) => {
                         const dayNum = i + 1;
                         const inThisDay = trip.activities.some(
@@ -383,7 +395,7 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
                                 onAddPlaceToDay(place, dayNum);
                               }
                             }}
-                            className={`text-[10px] px-2 py-1 font-mono font-semibold rounded cursor-pointer transition-colors ${
+                            className={`text-[10px] px-2 py-1 font-mono font-semibold rounded cursor-pointer transition-colors shrink-0 flex-shrink-0 whitespace-nowrap ${
                               inThisDay
                                 ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                                 : 'bg-white hover:bg-[#E05A47] hover:text-white border border-slate-200 text-slate-700'
@@ -393,7 +405,7 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
                           </button>
                         );
                       })}
-                    </div>
+                    </HorizontalScrollContainer>
                   </div>
                 )}
               </div>

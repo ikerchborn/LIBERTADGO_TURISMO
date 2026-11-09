@@ -70,9 +70,17 @@ function registerGracefulShutdown(server: Server): void {
 async function startServer() {
   const app = express();
 
-  // Cloud Run proporciona PORT automáticamente.
-  const PORT = Number(process.env.PORT) || 3000;
-  const HOST = '0.0.0.0';
+  // AI Studio and development dev-server port handling
+  const portArgIndex = process.argv.indexOf('--port');
+  const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? Number(process.argv[portArgIndex + 1]) : null;
+  const hostArgIndex = process.argv.indexOf('--host');
+  const cliHost = hostArgIndex !== -1 && process.argv[hostArgIndex + 1] ? process.argv[hostArgIndex + 1] : null;
+
+  // In AI Studio or development, use port 3000. In production (Cloud Run), honor process.env.PORT (8080).
+  const PORT = (cliPort && !isNaN(cliPort))
+    ? cliPort
+    : (process.env.NODE_ENV === 'production' && process.env.PORT ? Number(process.env.PORT) : 3000);
+  const HOST = cliHost || '0.0.0.0';
 
   let configError: string | null = null;
 
@@ -156,9 +164,12 @@ async function startServer() {
       res.status(404).json({ success: false, error: 'Endpoint API no encontrado' });
     });
 
-    // Servidor de desarrollo Vite
+    // Servidor de desarrollo Vite con HMR desactivado para evitar colisiones de puerto WebSocket
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: 'spa',
     });
 
@@ -176,6 +187,13 @@ async function startServer() {
       console.warn(
         `[LibertadGO] Running in setup/catalog-only mode due to missing production configuration.`
       );
+    }
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    console.error('[LibertadGO] HTTP server error:', err.message);
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[LibertadGO] Port ${PORT} is already in use.`);
     }
   });
 

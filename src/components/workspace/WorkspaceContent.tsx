@@ -28,6 +28,7 @@ import {
   matchesSearchQuery,
 } from '../../utils/filterUtils.ts';
 import { ItineraryView } from './ItineraryView.tsx';
+import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
 
 interface WorkspaceContentProps {
   trip: TripItinerary;
@@ -104,9 +105,13 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
   // Mantener visible el filtro de categoría seleccionado al desplazarse
   useEffect(() => {
-    const activeChip = categoryButtonsRef.current.get(selectedCategory);
-    if (activeChip && categoryContainerRef.current) {
-      activeChip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    if (selectedCategory === 'todas') {
+      categoryContainerRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+    } else {
+      const activeChip = categoryButtonsRef.current.get(selectedCategory);
+      if (activeChip && categoryContainerRef.current) {
+        activeChip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
     }
   }, [selectedCategory]);
 
@@ -311,11 +316,13 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             )}
           </div>
 
-          {/* Separación visual y Chips de Categorías deslizables con soporte táctil fluido */}
-          <div
-            ref={categoryContainerRef}
-            className="flex items-center gap-1.5 overflow-x-auto flex-nowrap no-scrollbar touch-pan-x overscroll-x-contain pt-0.5 pb-0.5"
-            style={{ WebkitOverflowScrolling: 'touch' }}
+          {/* Separación visual y Chips de Categorías deslizables con soporte táctil fluido, degradados y flechas en desktop */}
+          <HorizontalScrollContainer
+            innerRef={categoryContainerRef}
+            containerClassName="w-full"
+            className="gap-1.5 pt-0.5 pb-0.5"
+            gradientTheme="white"
+            ariaLabel="Filtros de categoría"
           >
             {FILTER_CATEGORIES.map((cat) => (
               <button
@@ -336,7 +343,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                 <span>{cat.label}</span>
               </button>
             ))}
-          </div>
+          </HorizontalScrollContainer>
         </div>
 
         {/* Vista Detallada de un Lugar (cuando está seleccionado) */}
@@ -448,28 +455,36 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                     />
                   </button>
 
-                  <div className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
+                  <div className="flex-1 min-w-0 flex items-center gap-1.5">
                     <span className="text-xs text-[#64748B] shrink-0 font-medium">Añadir a:</span>
-                    {dayItems.map((d) => {
-                      const isAlreadyInDay = trip.activities.some(
-                        (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                      );
-                      return (
-                        <button
-                          key={d.dayNumber}
-                          type="button"
-                          onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
-                          className={`px-3 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 transition-all cursor-pointer ${
-                            isAlreadyInDay
-                              ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
-                              : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 shadow-2xs'
-                          }`}
-                          title={isAlreadyInDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
-                        >
-                          {isAlreadyInDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
-                        </button>
-                      );
-                    })}
+                    <HorizontalScrollContainer
+                      containerClassName="flex-1 min-w-0"
+                      className="gap-1.5 py-0.5"
+                      gradientTheme="slate"
+                      arrowSize="sm"
+                      ariaLabel="Asignar lugar a día"
+                    >
+                      {dayItems.map((d) => {
+                        const isAlreadyInDay = trip.activities.some(
+                          (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                        );
+                        return (
+                          <button
+                            key={d.dayNumber}
+                            type="button"
+                            onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                            className={`px-3 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 flex-shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                              isAlreadyInDay
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
+                                : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 shadow-2xs'
+                            }`}
+                            title={isAlreadyInDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
+                          >
+                            {isAlreadyInDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
+                          </button>
+                        );
+                      })}
+                    </HorizontalScrollContainer>
                   </div>
                 </div>
               </div>
@@ -575,11 +590,17 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                     {/* Selector emergente de día asignable (con toggle independiente) */}
                     {isDayPickerOpen && (
                       <div
-                        className="mt-2.5 pt-2.5 border-t border-[#E9EEF4] flex items-center justify-between text-xs animate-in fade-in duration-100"
+                        className="mt-2.5 pt-2.5 border-t border-[#E9EEF4] flex items-center justify-between text-xs gap-2 animate-in fade-in duration-100 min-w-0"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <span className="text-[#64748B] text-[11px] font-medium">Asignar a:</span>
-                        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth">
+                        <span className="text-[#64748B] text-[11px] font-medium shrink-0">Asignar a:</span>
+                        <HorizontalScrollContainer
+                          containerClassName="flex-1 min-w-0"
+                          className="gap-1 py-0.5"
+                          gradientTheme="white"
+                          arrowSize="sm"
+                          ariaLabel="Asignar actividad a día"
+                        >
                           {dayItems.map((d) => {
                             const isAlreadyInDay = trip.activities.some(
                               (a) => a.placeId === place.id && a.dayNumber === d.dayNumber
@@ -589,7 +610,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                                 key={d.dayNumber}
                                 type="button"
                                 onClick={() => handleToggleDay(place, d.dayNumber)}
-                                className={`px-2.5 py-1 font-mono font-medium text-[11px] rounded-lg cursor-pointer transition-colors ${
+                                className={`px-2.5 py-1 font-mono font-medium text-[11px] rounded-lg cursor-pointer transition-colors shrink-0 flex-shrink-0 whitespace-nowrap ${
                                   isAlreadyInDay
                                     ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
                                     : 'bg-[#17243A] text-white hover:bg-[#E85B49] border border-[#17243A]'
@@ -600,7 +621,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                               </button>
                             );
                           })}
-                        </div>
+                        </HorizontalScrollContainer>
                       </div>
                     )}
                   </div>

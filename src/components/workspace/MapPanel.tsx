@@ -32,7 +32,8 @@ import {
   AlertCircle,
   RefreshCw,
   ChevronLeft,
-  Calendar
+  Calendar,
+  Compass
 } from 'lucide-react';
 import { PlaceImage } from '../common/PlaceImage.tsx';
 import {
@@ -43,6 +44,7 @@ import {
 import { getDayColor } from '../../utils/itineraryUtils.ts';
 import { calculateRealRoute, RouteData } from '../../utils/routingService.ts';
 import { WorkspaceSection } from './WorkspaceSidebar.tsx';
+import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
 
 interface MapPanelProps {
   trip: TripItinerary;
@@ -100,11 +102,49 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 }) => {
   const isItineraryMode = activeSection === 'itinerary';
   const categoryScrollRef = useRef<HTMLDivElement>(null);
+  const categoryChipButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const dayTabsScrollRef = useRef<HTMLDivElement>(null);
+  const dayTabButtonsRef = useRef<Map<number | 'all', HTMLButtonElement>>(new Map());
+  const previousSelectedDayRef = useRef<number | null | undefined>(undefined);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+
+  // Scroll suave al filtro de categoría seleccionado en modo Explorar
+  useEffect(() => {
+    if (selectedCategory === 'todas') {
+      categoryScrollRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+    } else {
+      const chip = categoryChipButtonsRef.current.get(selectedCategory);
+      if (chip && categoryScrollRef.current) {
+        chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
+    }
+  }, [selectedCategory]);
+
+  // Scroll suave al día seleccionado en el mapa (modo Planificar)
+  useEffect(() => {
+    if (previousSelectedDayRef.current === undefined) {
+      previousSelectedDayRef.current = selectedDayNumber;
+      if (dayTabsScrollRef.current) {
+        dayTabsScrollRef.current.scrollTo({ left: 0, behavior: 'instant' });
+      }
+      return;
+    }
+
+    if (previousSelectedDayRef.current !== selectedDayNumber || isItineraryMode) {
+      previousSelectedDayRef.current = selectedDayNumber;
+      if (selectedDayNumber === null || selectedDayNumber === 1) {
+        dayTabsScrollRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        const dayBtn = dayTabButtonsRef.current.get(selectedDayNumber);
+        if (dayBtn && dayTabsScrollRef.current) {
+          dayBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+      }
+    }
+  }, [selectedDayNumber, isItineraryMode]);
 
   const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -1083,138 +1123,275 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         )}
 
         {/* ============================================================ */}
-        {/* BUSCADOR FLOTANTE TIPO GOOGLE MAPS + FILTROS DE CATEGORÍA    */}
+        {/* BARRA SUPERIOR CONTEXTUAL: EXPLORAR VS PLANIFICAR            */}
         {/* ============================================================ */}
         <div className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 max-w-lg pointer-events-none">
-          {/* Barra de Búsqueda Flotante */}
-          <div className="relative pointer-events-auto">
-            <div className="flex items-center bg-white rounded-2xl shadow-md border border-[#E2E8F0] px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-[#E85B49]/20 focus-within:border-[#E85B49]">
-              <Search className="w-4 h-4 text-[#64748B] shrink-0 mr-2.5" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => onSearchChange?.(e.target.value)}
-                onFocus={() => setIsSearchFocused(true)}
-                placeholder="Buscar restaurantes, playas, museos..."
-                className="w-full text-xs sm:text-sm text-[#17243A] placeholder:text-[#94A3B8] bg-transparent outline-none"
-              />
-
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => onSearchChange?.('')}
-                  className="p-1 text-[#94A3B8] hover:text-[#17243A] cursor-pointer"
-                  title="Limpiar búsqueda"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-
-              <div className="h-4 w-px bg-[#E2E8F0] mx-2" />
-
-              {/* Botón de Filtros Avanzados (Sliders) */}
+          {/* Selector de Modo Contextual: Explorar Catálogo vs Planificar Itinerario */}
+          {onSelectSection && (
+            <div className="flex items-center gap-1 bg-white/95 backdrop-blur-md p-1 rounded-2xl shadow-md border border-[#E2E8F0] pointer-events-auto self-start">
               <button
                 type="button"
-                onClick={() => setIsAdvancedFiltersOpen(true)}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer relative ${
-                  onlySavedFilter || minRatingFilter > 0 || onlyMinceturFilter
-                    ? 'bg-[#E85B49] text-white'
-                    : 'text-[#64748B] hover:text-[#17243A] hover:bg-[#F1F5F9]'
+                onClick={() => onSelectSection('explore')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  !isItineraryMode
+                    ? 'bg-[#17243A] text-white shadow-xs'
+                    : 'text-[#64748B] hover:text-[#17243A] hover:bg-[#F8FAFC]'
                 }`}
-                title="Filtros avanzados"
-                aria-label="Filtros avanzados"
               >
-                <SlidersHorizontal className="w-4 h-4" />
-                {(onlySavedFilter || minRatingFilter > 0 || onlyMinceturFilter) && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#17243A] border-2 border-white" />
-                )}
+                <Compass className={`w-3.5 h-3.5 ${!isItineraryMode ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
+                <span>Explorar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectSection('itinerary')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isItineraryMode
+                    ? 'bg-[#17243A] text-white shadow-xs'
+                    : 'text-[#64748B] hover:text-[#17243A] hover:bg-[#F8FAFC]'
+                }`}
+              >
+                <Calendar className={`w-3.5 h-3.5 ${isItineraryMode ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
+                <span>Planificar {trip.activities.length > 0 ? `(${trip.activities.length})` : ''}</span>
               </button>
             </div>
+          )}
 
-            {/* Menú de Sugerencias en tiempo real */}
-            {searchSuggestions.length > 0 && isSearchFocused && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-[#E2E8F0] overflow-hidden z-30 animate-in fade-in zoom-in-95 duration-100">
-                <div className="p-1.5 space-y-0.5">
-                  {searchSuggestions.map((sug) => {
-                    const style = CATEGORY_STYLES[sug.category];
-                    const inTrip = trip.activities.find((a) => a.placeId === sug.id);
-                    return (
-                      <div
-                        key={sug.id}
-                        onMouseDown={() => {
-                          onSelectPlace(sug);
-                          onSearchChange?.(sug.name);
-                          setIsSearchFocused(false);
-                          mapInstanceRef.current?.flyTo({
-                            center: [sug.coordinates.lng, sug.coordinates.lat],
-                            zoom: 16,
-                            duration: 700,
-                          });
-                        }}
-                        className="flex items-center justify-between p-2 rounded-lg hover:bg-[#F8FAFC] cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 truncate">
-                          <span className="text-sm shrink-0">{style?.icon || '📍'}</span>
-                          <div className="truncate">
-                            <span className="text-xs font-bold text-[#17243A] block truncate">
-                              {sug.name}
-                            </span>
-                            <span className="text-[11px] text-[#64748B] block truncate">
-                              {sug.address.split(',')[0]} · {sug.localityName}
-                            </span>
-                          </div>
-                        </div>
-
-                        {inTrip && (
-                          <span className="text-[10px] font-semibold text-white bg-[#E85B49] px-1.5 py-0.5 rounded shrink-0 ml-2">
-                            Día {inTrip.dayNumber}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Carrusel Desplazable de Filtros por Categoría */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5 pointer-events-auto">
-            {FILTER_CATEGORIES.map((cat) => {
-              const isActive = selectedCategory === cat.id;
-              return (
+          {isItineraryMode ? (
+            /* ================= MODO PLANIFICAR (ITINERARIO POR DÍAS) ================= */
+            <div className="flex flex-col gap-1.5 pointer-events-auto animate-in fade-in duration-150">
+              {/* Carrusel Desplazable de Días del Itinerario con soporte táctil fluido, degradados y flechas en desktop */}
+              <HorizontalScrollContainer
+                innerRef={dayTabsScrollRef}
+                containerClassName="w-full bg-white/95 backdrop-blur-md rounded-2xl shadow-md border border-[#E2E8F0] p-1 pointer-events-auto"
+                className="gap-1.5"
+                gradientTheme="white"
+                scrollStep={220}
+                ariaLabel="Días del itinerario en mapa"
+              >
+                {/* Opción: Todos los días */}
                 <button
-                  key={cat.id}
+                  ref={(el) => {
+                    if (el) dayTabButtonsRef.current.set('all', el);
+                    else dayTabButtonsRef.current.delete('all');
+                  }}
                   type="button"
-                  onClick={() => onCategoryChange?.(cat.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
-                    isActive
-                      ? 'bg-[#17243A] text-white ring-2 ring-[#17243A]/20'
-                      : 'bg-white/95 text-[#475569] hover:bg-white hover:text-[#0F172A] border border-[#E2E8F0]/80'
+                  onClick={() => onSelectDayNumber?.(null)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 flex-shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                    selectedDayNumber === null
+                      ? 'bg-[#17243A] text-white shadow-xs'
+                      : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] border border-[#E2E8F0]/70'
                   }`}
                 >
-                  <span className="text-[11px]">{cat.icon}</span>
-                  <span>{cat.label}</span>
+                  <span>Todos los días</span>
+                  <span
+                    className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                      selectedDayNumber === null ? 'bg-white/20 text-white' : 'bg-[#E2E8F0] text-[#475569]'
+                    }`}
+                  >
+                    {trip.activities.length}
+                  </span>
                 </button>
-              );
-            })}
-          </div>
 
-          {/* Estado de Filtro de Zona Activo */}
-          {isAreaFilterActive && (
-            <div className="flex items-center gap-2 pointer-events-auto">
-              <span className="px-2.5 py-1 text-[11px] font-medium bg-[#17243A] text-white rounded-lg shadow-xs flex items-center gap-1.5">
-                <span>Filtro de zona activo ({filteredPlaces.length} lugares)</span>
-                <button
-                  type="button"
-                  onClick={() => setIsAreaFilterActive(false)}
-                  className="p-0.5 hover:bg-white/20 rounded cursor-pointer"
-                  title="Ver todos los lugares"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
+                {/* Días individuales */}
+                {dayItems.map((day) => {
+                  const dayCount = trip.activities.filter((a) => a.dayNumber === day.dayNumber).length;
+                  const isSelected = selectedDayNumber === day.dayNumber;
+                  const dayColor = getDayColor(day.dayNumber);
+
+                  return (
+                    <button
+                      ref={(el) => {
+                        if (el) dayTabButtonsRef.current.set(day.dayNumber, el);
+                        else dayTabButtonsRef.current.delete(day.dayNumber);
+                      }}
+                      key={day.dayNumber}
+                      type="button"
+                      onClick={() => onSelectDayNumber?.(day.dayNumber)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 flex-shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                        isSelected
+                          ? 'bg-[#17243A] text-white shadow-xs ring-2 ring-[#E85B49]/40'
+                          : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] border border-[#E2E8F0]/70'
+                      }`}
+                    >
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: dayColor.bg }}
+                      />
+                      <span>{day.label}</span>
+                      <span
+                        className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full leading-none ${
+                          isSelected
+                            ? 'bg-white/20 text-white'
+                            : dayCount > 0
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-[#E2E8F0] text-[#64748B]'
+                        }`}
+                      >
+                        {dayCount}
+                      </span>
+                    </button>
+                  );
+                })}
+              </HorizontalScrollContainer>
+
+              {/* Indicador de estado para el día seleccionado en Planificar */}
+              {selectedDayNumber && (
+                <div className="flex items-center gap-1.5 bg-[#17243A]/90 backdrop-blur-md text-white text-[11px] font-medium px-3 py-1.5 rounded-xl shadow-xs self-start">
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: getDayColor(selectedDayNumber).bg }}
+                  />
+                  <span>
+                    Día {selectedDayNumber}: {trip.activities.filter((a) => a.dayNumber === selectedDayNumber).length} actividades programadas
+                  </span>
+                </div>
+              )}
             </div>
+          ) : (
+            /* ================= MODO EXPLORAR (CATÁLOGO COMPLETO) ================= */
+            <>
+              {/* Barra de Búsqueda Flotante */}
+              <div className="relative pointer-events-auto">
+                <div className="flex items-center bg-white rounded-2xl shadow-md border border-[#E2E8F0] px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-[#E85B49]/20 focus-within:border-[#E85B49]">
+                  <Search className="w-4 h-4 text-[#64748B] shrink-0 mr-2.5" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => onSearchChange?.(e.target.value)}
+                    onFocus={() => setIsSearchFocused(true)}
+                    placeholder="Buscar restaurantes, playas, museos..."
+                    className="w-full text-xs sm:text-sm text-[#17243A] placeholder:text-[#94A3B8] bg-transparent outline-none"
+                  />
+
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => onSearchChange?.('')}
+                      className="p-1 text-[#94A3B8] hover:text-[#17243A] cursor-pointer"
+                      title="Limpiar búsqueda"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  <div className="h-4 w-px bg-[#E2E8F0] mx-2" />
+
+                  {/* Botón de Filtros Avanzados (Sliders) */}
+                  <button
+                    type="button"
+                    onClick={() => setIsAdvancedFiltersOpen(true)}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer relative ${
+                      onlySavedFilter || minRatingFilter > 0 || onlyMinceturFilter
+                        ? 'bg-[#E85B49] text-white'
+                        : 'text-[#64748B] hover:text-[#17243A] hover:bg-[#F1F5F9]'
+                    }`}
+                    title="Filtros avanzados"
+                    aria-label="Filtros avanzados"
+                  >
+                    <SlidersHorizontal className="w-4 h-4" />
+                    {(onlySavedFilter || minRatingFilter > 0 || onlyMinceturFilter) && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#17243A] border-2 border-white" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Menú de Sugerencias en tiempo real */}
+                {searchSuggestions.length > 0 && isSearchFocused && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-[#E2E8F0] overflow-hidden z-30 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="p-1.5 space-y-0.5">
+                      {searchSuggestions.map((sug) => {
+                        const style = CATEGORY_STYLES[sug.category];
+                        const inTrip = trip.activities.find((a) => a.placeId === sug.id);
+                        return (
+                          <div
+                            key={sug.id}
+                            onMouseDown={() => {
+                              onSelectPlace(sug);
+                              onSearchChange?.(sug.name);
+                              setIsSearchFocused(false);
+                              mapInstanceRef.current?.flyTo({
+                                center: [sug.coordinates.lng, sug.coordinates.lat],
+                                zoom: 16,
+                                duration: 700,
+                              });
+                            }}
+                            className="flex items-center justify-between p-2 rounded-lg hover:bg-[#F8FAFC] cursor-pointer transition-colors"
+                          >
+                            <div className="flex items-center gap-2.5 truncate">
+                              <span className="text-sm shrink-0">{style?.icon || '📍'}</span>
+                              <div className="truncate">
+                                <span className="text-xs font-bold text-[#17243A] block truncate">
+                                  {sug.name}
+                                </span>
+                                <span className="text-[11px] text-[#64748B] block truncate">
+                                  {sug.address.split(',')[0]} · {sug.localityName}
+                                </span>
+                              </div>
+                            </div>
+
+                            {inTrip && (
+                              <span className="text-[10px] font-semibold text-white bg-[#E85B49] px-1.5 py-0.5 rounded shrink-0 ml-2">
+                                Día {inTrip.dayNumber}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Carrusel Desplazable de Filtros por Categoría con soporte táctil fluido, degradados y flechas en desktop */}
+              <HorizontalScrollContainer
+                innerRef={categoryScrollRef}
+                containerClassName="w-full pointer-events-auto"
+                className="gap-1.5 py-0.5"
+                gradientTheme="white"
+                scrollStep={200}
+                ariaLabel="Categorías de lugares en mapa"
+              >
+                {FILTER_CATEGORIES.map((cat) => {
+                  const isActive = selectedCategory === cat.id;
+                  return (
+                    <button
+                      ref={(el) => {
+                        if (el) categoryChipButtonsRef.current.set(cat.id, el);
+                        else categoryChipButtonsRef.current.delete(cat.id);
+                      }}
+                      key={cat.id}
+                      type="button"
+                      onClick={() => onCategoryChange?.(cat.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 flex-shrink-0 shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                        isActive
+                          ? 'bg-[#17243A] text-white ring-2 ring-[#17243A]/20'
+                          : 'bg-white/95 text-[#475569] hover:bg-white hover:text-[#0F172A] border border-[#E2E8F0]/80'
+                      }`}
+                    >
+                      <span className="text-[11px]">{cat.icon}</span>
+                      <span>{cat.label}</span>
+                    </button>
+                  );
+                })}
+              </HorizontalScrollContainer>
+
+              {/* Estado de Filtro de Zona Activo */}
+              {isAreaFilterActive && (
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  <span className="px-2.5 py-1 text-[11px] font-medium bg-[#17243A] text-white rounded-lg shadow-xs flex items-center gap-1.5">
+                    <span>Filtro de zona activo ({filteredPlaces.length} lugares)</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsAreaFilterActive(false)}
+                      className="p-0.5 hover:bg-white/20 rounded cursor-pointer"
+                      title="Ver todos los lugares"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -1292,8 +1469,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           </div>
         )}
 
-        {/* Indicador de estado vacío si no hay resultados */}
-        {filteredPlaces.length === 0 && mapLoaded && (
+        {/* Indicador de estado vacío en Modo Explorar */}
+        {!isItineraryMode && filteredPlaces.length === 0 && mapLoaded && (
           <div className="absolute top-36 left-1/2 -translate-x-1/2 z-10 pointer-events-auto animate-in fade-in duration-200">
             <div className="bg-white/95 backdrop-blur-xs border border-[#E2E8F0] rounded-xl px-3.5 py-2 shadow-md text-xs text-[#64748B] flex items-center gap-2">
               <span>No hay lugares que coincidan con los filtros.</span>
@@ -1311,6 +1488,33 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               >
                 Limpiar filtros
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Indicador de estado vacío en Modo Planificar */}
+        {isItineraryMode && selectedDayNumber && trip.activities.filter((a) => a.dayNumber === selectedDayNumber).length === 0 && mapLoaded && (
+          <div className="absolute top-36 left-1/2 -translate-x-1/2 z-10 pointer-events-auto animate-in fade-in duration-200 max-w-[92%] sm:max-w-sm">
+            <div className="bg-white/95 backdrop-blur-md border border-[#E2E8F0] rounded-2xl p-4 shadow-lg text-center space-y-2">
+              <span className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-500 font-bold text-xs">
+                D{selectedDayNumber}
+              </span>
+              <p className="text-xs font-bold text-[#17243A]">
+                Sin actividades programadas para el Día {selectedDayNumber}
+              </p>
+              <p className="text-[11px] text-[#64748B]">
+                Pasa al modo Explorar para descubrir experiencias y agregarlas a este día.
+              </p>
+              {onSelectSection && (
+                <button
+                  type="button"
+                  onClick={() => onSelectSection('explore')}
+                  className="px-3.5 py-1.5 bg-[#E85B49] text-white text-xs font-semibold rounded-xl hover:bg-[#D94C3A] transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                >
+                  <Compass className="w-3.5 h-3.5" />
+                  <span>Explorar experiencias</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1564,29 +1768,37 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       </button>
                     )}
 
-                    {/* Botones de asignación de días con toggle independiente */}
-                    <div className="flex-1 flex items-center justify-end gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5">
+                    {/* Botones de asignación de días con toggle independiente y scroll suave con flechas */}
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5 pl-2">
                       <span className="text-[11px] text-[#64748B] shrink-0 font-medium">Añadir a:</span>
-                      {dayItems.map((d) => {
-                        const inThisDay = trip.activities.some(
-                          (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                        );
-                        return (
-                          <button
-                            key={d.dayNumber}
-                            type="button"
-                            onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
-                            className={`px-2.5 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 transition-all cursor-pointer ${
-                              inThisDay
-                                ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
-                                : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 shadow-2xs'
-                            }`}
-                            title={inThisDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
-                          >
-                            {inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
-                          </button>
-                        );
-                      })}
+                      <HorizontalScrollContainer
+                        containerClassName="flex-1 min-w-0"
+                        className="gap-1.5 py-0.5"
+                        gradientTheme="white"
+                        arrowSize="sm"
+                        ariaLabel="Asignar lugar a día"
+                      >
+                        {dayItems.map((d) => {
+                          const inThisDay = trip.activities.some(
+                            (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                          );
+                          return (
+                            <button
+                              key={d.dayNumber}
+                              type="button"
+                              onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                              className={`px-2.5 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 flex-shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                                inThisDay
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
+                                  : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 shadow-2xs'
+                              }`}
+                              title={inThisDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
+                            >
+                              {inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
+                            </button>
+                          );
+                        })}
+                      </HorizontalScrollContainer>
                     </div>
                   </div>
                 </div>
@@ -1661,14 +1873,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       {/* ============================================================ */}
       {isAdvancedFiltersOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40 backdrop-blur-2xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-xs overscroll-none animate-in fade-in duration-150"
           onClick={() => setIsAdvancedFiltersOpen(false)}
         >
           <div
-            className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl border border-[#E2E8F0] shadow-2xl flex flex-col max-h-[90dvh] sm:max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+            className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl border border-[#E2E8F0] shadow-2xl flex flex-col max-h-[85dvh] sm:max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
             onClick={(e) => e.stopPropagation()}
-            onWheel={(e) => e.stopPropagation()}
-            onTouchMove={(e) => e.stopPropagation()}
           >
             {/* Tirador táctil móvil */}
             <div className="w-12 h-1 bg-slate-300 rounded-full mx-auto my-2 shrink-0 sm:hidden" />
@@ -1694,7 +1904,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
             {/* Contenido Central con Scroll Táctil Independiente */}
             <div
-              className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4 touch-pan-y"
+              className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-4 touch-pan-y"
               style={{ WebkitOverflowScrolling: 'touch' }}
             >
               {/* Categorías */}

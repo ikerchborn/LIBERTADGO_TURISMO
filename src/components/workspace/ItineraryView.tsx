@@ -23,6 +23,7 @@ import { generateDayList, TripDayItem } from '../../utils/dateUtils.ts';
 import { getDayColor, getActivitiesForDay } from '../../utils/itineraryUtils.ts';
 import { calculateRealRoute, RouteData } from '../../utils/routingService.ts';
 import { PlaceImage } from '../common/PlaceImage.tsx';
+import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
 
 interface ItineraryViewProps {
   trip: TripItinerary;
@@ -91,26 +92,31 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
 
   // Desplazamiento horizontal controlado de pestañas de días
   useEffect(() => {
-    // En la apertura inicial, asegurar que Día 1 y Todos los días aparezcan al inicio (scrollLeft = 0)
+    // Al montar o cambiar de viaje, asegurar siempre que Día 1 y Todos los días aparezcan al inicio (scrollLeft = 0)
     if (previousSelectedDayRef.current === undefined) {
       previousSelectedDayRef.current = selectedDayNumber;
       if (daysContainerRef.current) {
-        daysContainerRef.current.scrollLeft = 0;
+        daysContainerRef.current.scrollTo({ left: 0, behavior: 'instant' });
       }
       return;
     }
 
-    // Solo si el día cambió explícitamente, desplazar suavemente si queda fuera del viewport visible
+    // Solo si el usuario cambió explícitamente de día, desplazar suavemente si queda fuera del viewport visible
     if (previousSelectedDayRef.current !== selectedDayNumber) {
       previousSelectedDayRef.current = selectedDayNumber;
-      const targetKey = selectedDayNumber ?? 'all';
-      const buttonEl = dayButtonsRef.current.get(targetKey);
-      if (buttonEl && daysContainerRef.current) {
-        buttonEl.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-          inline: 'center',
-        });
+
+      if (selectedDayNumber === null || selectedDayNumber === 1) {
+        daysContainerRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        const targetKey = selectedDayNumber;
+        const buttonEl = dayButtonsRef.current.get(targetKey);
+        if (buttonEl && daysContainerRef.current) {
+          buttonEl.scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest',
+            inline: 'nearest',
+          });
+        }
       }
     }
   }, [selectedDayNumber]);
@@ -308,11 +314,14 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
           </span>
         </div>
 
-        {/* Carousel horizontal de pestañas de días con soporte táctil fluido */}
-        <div
-          ref={daysContainerRef}
-          className="flex items-center gap-1.5 overflow-x-auto flex-nowrap shrink-0 py-0.5 no-scrollbar touch-pan-x overscroll-x-contain"
-          style={{ WebkitOverflowScrolling: 'touch' }}
+        {/* Carousel horizontal de pestañas de días con soporte táctil fluido, degradados y flechas en desktop */}
+        <HorizontalScrollContainer
+          innerRef={daysContainerRef}
+          containerClassName="w-full shrink-0"
+          className="gap-1.5 py-0.5"
+          gradientTheme="white"
+          scrollStep={240}
+          ariaLabel="Días del itinerario"
         >
           {/* Opción: Todos los días */}
           <button
@@ -402,7 +411,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
               </button>
             );
           })}
-        </div>
+        </HorizontalScrollContainer>
       </div>
 
       {/* 
@@ -735,8 +744,8 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                             </div>
 
                             {/* Barra inferior de acciones: Ver detalles, Cambiar día, Subir/Bajar, Quitar */}
-                            <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-[#F1F5F9] text-xs">
-                              <div className="flex items-center gap-2">
+                            <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-[#F1F5F9] text-xs flex-wrap gap-2 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap min-w-0">
                                 {place && (
                                   <button
                                     type="button"

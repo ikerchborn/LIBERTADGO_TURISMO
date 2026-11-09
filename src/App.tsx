@@ -67,10 +67,10 @@ export default function App() {
   const handleSelectPlace = (place: Place | null) => {
     setSelectedPlace(place);
 
-    if (place) {
-      if (activeSection !== 'explore') {
-        setPreviousSection(activeSection);
-      }
+    // Only auto-switch to explore if we're not in itinerary or explore mode
+    // In itinerary mode, keep user in itinerary mode and show place context
+    if (place && activeSection !== 'itinerary' && activeSection !== 'explore') {
+      setPreviousSection(activeSection);
       setActiveSection('explore');
     }
   };

@@ -136,7 +136,7 @@ export const Header: React.FC<HeaderProps> = ({
                   title="Toca para renombrar este viaje"
                 >
                   <MapPin className="w-3 h-3 text-[#E85B49] shrink-0" />
-                  <span className="text-xs font-bold text-[#17243A] truncate max-w-[110px] xs:max-w-[140px] sm:max-w-[200px]">
+                  <span className="text-xs font-bold text-[#17243A] truncate max-w-[95px] xs:max-w-[140px] sm:max-w-[200px]">
                     {currentTrip.title}
                   </span>
                   <Edit2 className="w-2.5 h-2.5 text-[#94A3B8] shrink-0 ml-0.5 opacity-60" />
