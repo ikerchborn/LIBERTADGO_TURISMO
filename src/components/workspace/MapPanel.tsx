@@ -26,13 +26,15 @@ interface MapPanelProps {
   trip: TripItinerary;
   places: Place[];
   selectedPlace: Place | null;
-  onSelectPlace: (place: Place) => void;
+  onSelectPlace: (place: Place | null) => void;
   onAddPlaceToDay?: (place: Place, dayNumber: number) => void;
   onRemoveActivity?: (activityId: string) => void;
   onToggleSavePlace?: (placeId: string) => void;
   selectedDayNumber?: number | null;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  mobileTab?: 'content' | 'map';
+  onSwitchToContent?: () => void;
 }
 
 // Visual category styling
@@ -57,6 +59,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   selectedDayNumber = null,
   isCollapsed = false,
   onToggleCollapse,
+  mobileTab = 'content',
+  onSwitchToContent,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
@@ -201,16 +205,29 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     if (!mapContainerRef.current) return;
 
     const ro = new ResizeObserver(() => {
-      if (mapInstanceRef.current && mapLoaded) {
+      if (mapInstanceRef.current) {
         mapInstanceRef.current.resize();
       }
     });
 
     ro.observe(mapContainerRef.current);
     return () => ro.disconnect();
-  }, [mapLoaded]);
+  }, []);
 
-  // Re-trigger resize when collapse state changes
+  // Re-dimensionar mapa cuando se activa la pestaña 'map' en móvil
+  useEffect(() => {
+    if (mobileTab === 'map' && mapInstanceRef.current) {
+      requestAnimationFrame(() => {
+        mapInstanceRef.current?.resize();
+      });
+      const timer = setTimeout(() => {
+        mapInstanceRef.current?.resize();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [mobileTab]);
+
+  // Re-trigger resize when collapse state changes (desktop)
   useEffect(() => {
     if (!isCollapsed && mapInstanceRef.current) {
       requestAnimationFrame(() => {
@@ -306,19 +323,40 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         label: 'Lugar',
       };
 
+      // Contenedor interactivo (Hitbox mínima de 44x44px para punteros y pantallas táctiles)
       const el = document.createElement('div');
-      el.className = `cursor-pointer transition-transform duration-200 select-none ${
-        isSelected ? 'scale-125 z-50' : 'hover:scale-115 z-20'
-      }`;
+      el.className = 'libertadgo-map-marker-hitbox';
+      el.style.width = '44px';
+      el.style.height = '44px';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.cursor = 'pointer';
+      el.style.userSelect = 'none';
+      el.style.pointerEvents = 'auto';
+      el.style.zIndex = isSelected ? '50' : '20';
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', `${place.name} · ${place.category}`);
+
+      // Elemento visual interior con dimensiones exactas según su categoría
+      const inner = document.createElement('div');
+      inner.className = 'libertadgo-map-marker-badge';
+      inner.style.transition = 'transform 160ms cubic-bezier(0.16, 1, 0.3, 1), filter 160ms ease';
+      inner.style.display = 'flex';
+      inner.style.alignItems = 'center';
+      inner.style.justifyContent = 'center';
+      inner.style.pointerEvents = 'none';
 
       if (isItineraryItem && activity) {
-        // TIPO 1: ACTIVIDAD DE ITINERARIO (Máxima jerarquía)
+        // TIPO 1: ACTIVIDAD DE ITINERARIO (32px - Máxima jerarquía)
         const dayOrderNumber = activity.order;
         const opacity = !matchesActiveDay && selectedDayNumber ? '0.45' : '1.0';
+        const bg = isSelected ? '#17243A' : '#E85B49';
 
-        el.innerHTML = `
+        inner.innerHTML = `
           <div style="
-            background: ${isSelected ? '#17243A' : '#E85B49'};
+            background: ${bg};
             color: #FFFFFF;
             width: 32px;
             height: 32px;
@@ -330,7 +368,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             font-size: 13px;
             font-family: system-ui, -apple-system, sans-serif;
             border: 2.5px solid #FFFFFF;
-            box-shadow: 0 4px 10px rgba(232, 91, 73, 0.45);
+            box-shadow: ${isSelected ? '0 0 0 4px rgba(232, 91, 73, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 10px rgba(232, 91, 73, 0.45)'};
             position: relative;
             opacity: ${opacity};
             transform: ${isSelected ? 'scale(1.15)' : 'none'};
@@ -341,7 +379,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               bottom: -4px;
               width: 8px;
               height: 8px;
-              background: ${isSelected ? '#17243A' : '#E85B49'};
+              background: ${bg};
               transform: rotate(45deg);
               border-bottom: 2px solid #FFFFFF;
               border-right: 2px solid #FFFFFF;
@@ -349,8 +387,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           </div>
         `;
       } else if (isSaved) {
-        // TIPO 2: LUGAR GUARDADO (WISHLIST) (Borde ámbar + fondo azul marino + bookmark)
-        el.innerHTML = `
+        // TIPO 2: LUGAR GUARDADO (WISHLIST) (28px - Borde ámbar + fondo azul marino + bookmark)
+        inner.innerHTML = `
           <div style="
             background: #17243A;
             color: #FBBF24;
@@ -362,15 +400,16 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             justify-content: center;
             font-size: 13px;
             border: 2.5px solid #D97706;
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+            box-shadow: ${isSelected ? '0 0 0 4px rgba(217, 119, 6, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3)' : '0 3px 8px rgba(0, 0, 0, 0.25)'};
             position: relative;
+            transform: ${isSelected ? 'scale(1.15)' : 'none'};
           " title="${place.name} (En tu lista para visitar)">
             🔖
           </div>
         `;
       } else {
-        // TIPO 3: CATÁLOGO GENERAL (Sutil y no invasivo)
-        el.innerHTML = `
+        // TIPO 3: CATÁLOGO GENERAL (24px - Sutil y no invasivo)
+        inner.innerHTML = `
           <div style="
             background: ${isSelected ? '#17243A' : '#FFFFFF'};
             color: ${isSelected ? '#FFFFFF' : '#17243A'};
@@ -382,16 +421,51 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             justify-content: center;
             font-size: 11px;
             border: 2px solid ${categoryStyle.bg};
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+            box-shadow: ${isSelected ? '0 0 0 4px rgba(232, 91, 73, 0.35), 0 3px 8px rgba(0, 0, 0, 0.25)' : '0 2px 6px rgba(0, 0, 0, 0.15)'};
+            transform: ${isSelected ? 'scale(1.15)' : 'none'};
           " title="${place.name} (${categoryStyle.label})">
             <span>${categoryStyle.icon}</span>
           </div>
         `;
       }
 
+      el.appendChild(inner);
+
+      // Prevenir que el gestor DragPan de MapLibre intercepte el clic por micro-movimientos
+      el.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+      });
+
+      el.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+      });
+
+      // Selección de lugar garantizada en clic
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         onSelectPlace(place);
+      });
+
+      // Accesibilidad con teclado
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          onSelectPlace(place);
+        }
+      });
+
+      // Efectos reactivos de Hover
+      el.addEventListener('mouseenter', () => {
+        el.style.zIndex = '60';
+        inner.style.transform = isSelected ? 'scale(1.22)' : 'scale(1.18)';
+        inner.style.filter = 'drop-shadow(0 4px 10px rgba(0, 0, 0, 0.25))';
+      });
+
+      el.addEventListener('mouseleave', () => {
+        el.style.zIndex = isSelected ? '50' : '20';
+        inner.style.transform = 'none';
+        inner.style.filter = 'none';
       });
 
       const marker = new maplibregl.Marker({ element: el })
@@ -556,7 +630,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           <div className="absolute bottom-4 left-3 right-3 sm:right-auto sm:max-w-sm z-20 animate-in fade-in slide-in-from-bottom-2 duration-150">
             <div className="bg-white rounded-2xl border border-[#E9EEF4] shadow-lg p-3.5 flex flex-col gap-2.5">
               <div className="flex items-start justify-between">
-                <div className="flex gap-3 flex-1 min-w-0">
+                <div
+                  className={`flex gap-3 flex-1 min-w-0 ${onSwitchToContent ? 'cursor-pointer group' : ''}`}
+                  onClick={() => onSwitchToContent && onSwitchToContent()}
+                  title={onSwitchToContent ? 'Ver ficha completa en el Plan' : undefined}
+                >
                   <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-slate-100">
                     <PlaceImage
                       src={selectedPlace.images[0]?.url}
@@ -575,24 +653,31 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                         </span>
                       )}
                     </div>
-                    <h4 className="text-xs font-bold text-[#17243A] truncate mt-0.5">
+                    <h4 className="text-xs font-bold text-[#17243A] truncate mt-0.5 group-hover:text-[#E85B49] transition-colors">
                       {selectedPlace.name}
                     </h4>
                     <p className="text-[11px] text-[#64748B] truncate">
                       {selectedPlace.address}
                     </p>
-                    {selectedPlace.rating && (
-                      <div className="flex items-center gap-1 text-[11px] text-amber-600 font-semibold mt-0.5">
-                        <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                        <span>{selectedPlace.rating}</span>
-                      </div>
-                    )}
+                    <div className="flex items-center justify-between mt-0.5">
+                      {selectedPlace.rating ? (
+                        <div className="flex items-center gap-1 text-[11px] text-amber-600 font-semibold">
+                          <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                          <span>{selectedPlace.rating}</span>
+                        </div>
+                      ) : <span />}
+                      {onSwitchToContent && (
+                        <span className="text-[10px] text-[#E85B49] font-semibold hover:underline">
+                          Ficha completa →
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => onSelectPlace(null as unknown as Place)}
+                  onClick={() => onSelectPlace(null)}
                   className="p-1 text-[#64748B] hover:text-[#17243A] -mr-1 -mt-1 cursor-pointer"
                   title="Cerrar ficha flotante"
                 >

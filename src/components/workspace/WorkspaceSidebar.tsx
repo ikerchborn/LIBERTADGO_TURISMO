@@ -36,25 +36,36 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
     <>
       {/* 
         VISTA MÓVIL (< md):
-        Barra horizontal limpia de pestañas para no apretar el contenido
+        Barra horizontal limpia de pestañas optimizada para smartphones
       */}
       <div className="flex md:hidden flex-col w-full bg-white border-b border-[#E9EEF4] shrink-0 select-none">
-        {/* Pestañas de sección */}
-        <div className="flex items-center gap-1 overflow-x-auto p-2 no-scrollbar border-b border-[#E9EEF4]/60">
+        {/* Pestañas de sección con scroll táctil fluido sin barra nativa */}
+        <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2 no-scrollbar border-b border-[#E9EEF4]/60 scroll-smooth">
           <button
             type="button"
             onClick={() => {
               onSelectSection('itinerary');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'itinerary'
-                ? 'bg-[#17243A] text-white'
-                : 'bg-[#F7F8FA] text-[#64748B]'
+                ? 'bg-[#17243A] text-white font-semibold shadow-xs'
+                : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
             }`}
           >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Itinerario ({totalActivities})</span>
+            <Calendar className={`w-3.5 h-3.5 ${activeSection === 'itinerary' ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
+            <span>Itinerario</span>
+            {totalActivities > 0 && (
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full leading-none font-semibold ${
+                  activeSection === 'itinerary'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-[#E2E8F0] text-[#475569]'
+                }`}
+              >
+                {totalActivities}
+              </span>
+            )}
           </button>
 
           <button
@@ -63,13 +74,13 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
               onSelectSection('explore');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'explore'
-                ? 'bg-[#17243A] text-white'
-                : 'bg-[#F7F8FA] text-[#64748B]'
+                ? 'bg-[#17243A] text-white font-semibold shadow-xs'
+                : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
             }`}
           >
-            <Search className="w-3.5 h-3.5" />
+            <Search className={`w-3.5 h-3.5 ${activeSection === 'explore' ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
             <span>Explorar</span>
           </button>
 
@@ -79,14 +90,25 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
               onSelectSection('saved');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'saved'
-                ? 'bg-[#17243A] text-white'
-                : 'bg-[#F7F8FA] text-[#64748B]'
+                ? 'bg-[#17243A] text-white font-semibold shadow-xs'
+                : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
             }`}
           >
-            <Bookmark className="w-3.5 h-3.5" />
-            <span>Por visitar {savedCount > 0 ? `(${savedCount})` : ''}</span>
+            <Bookmark className={`w-3.5 h-3.5 ${activeSection === 'saved' ? 'text-[#E85B49] fill-[#E85B49]' : 'text-[#64748B]'}`} />
+            <span>Por visitar</span>
+            {savedCount > 0 && (
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full leading-none font-semibold ${
+                  activeSection === 'saved'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-[#E2E8F0] text-[#475569]'
+                }`}
+              >
+                {savedCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -95,13 +117,13 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
               onSelectSection('notes');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'notes'
-                ? 'bg-[#17243A] text-white'
-                : 'bg-[#F7F8FA] text-[#64748B]'
+                ? 'bg-[#17243A] text-white font-semibold shadow-xs'
+                : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
             }`}
           >
-            <FileText className="w-3.5 h-3.5" />
+            <FileText className={`w-3.5 h-3.5 ${activeSection === 'notes' ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
             <span>Notas</span>
           </button>
 
@@ -111,27 +133,27 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
               onSelectSection('overview');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'overview'
-                ? 'bg-[#17243A] text-white'
-                : 'bg-[#F7F8FA] text-[#64748B]'
+                ? 'bg-[#17243A] text-white font-semibold shadow-xs'
+                : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
             }`}
           >
-            <Compass className="w-3.5 h-3.5" />
+            <Compass className={`w-3.5 h-3.5 ${activeSection === 'overview' ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
             <span>Resumen</span>
           </button>
         </div>
 
         {/* Sub-selector de días si está en itinerario */}
         {activeSection === 'itinerary' && (
-          <div className="flex items-center gap-1.5 overflow-x-auto px-2 py-1.5 bg-[#F7F8FA] no-scrollbar">
+          <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2 bg-[#F8FAFC] no-scrollbar border-b border-[#E9EEF4]/70 scroll-smooth">
             <button
               type="button"
               onClick={() => onSelectDayNumber(null)}
-              className={`px-2.5 py-1 text-xs rounded-md font-mono shrink-0 cursor-pointer ${
+              className={`px-2.5 py-1 text-xs rounded-lg font-mono shrink-0 cursor-pointer transition-colors ${
                 selectedDayNumber === null
-                  ? 'bg-white text-[#17243A] font-bold shadow-xs border border-[#E9EEF4]'
-                  : 'text-[#64748B]'
+                  ? 'bg-[#17243A] text-white font-bold shadow-xs'
+                  : 'bg-white text-[#64748B] hover:text-[#17243A] border border-[#E2E8F0]'
               }`}
             >
               Todos los días
@@ -141,10 +163,10 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
                 key={d.dayNumber}
                 type="button"
                 onClick={() => onSelectDayNumber(d.dayNumber)}
-                className={`px-2 py-1 text-xs rounded-md font-mono shrink-0 cursor-pointer ${
+                className={`px-2.5 py-1 text-xs rounded-lg font-mono shrink-0 cursor-pointer transition-colors ${
                   selectedDayNumber === d.dayNumber
-                    ? 'bg-white text-[#17243A] font-bold shadow-xs border border-[#E9EEF4]'
-                    : 'text-[#64748B]'
+                    ? 'bg-[#17243A] text-white font-bold shadow-xs'
+                    : 'bg-white text-[#64748B] hover:text-[#17243A] border border-[#E2E8F0]'
                 }`}
               >
                 Día {d.dayNumber}

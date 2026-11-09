@@ -27,6 +27,7 @@ export default function App() {
 
   // Wanderlog Workspace State
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('overview');
+  const [previousSection, setPreviousSection] = useState<WorkspaceSection | null>(null);
   const [selectedDayNumber, setSelectedDayNumber] = useState<number | null>(null);
   const [mobileTab, setMobileTab] = useState<'content' | 'map'>('content');
   const [isMapCollapsed, setIsMapCollapsed] = useState<boolean>(false);
@@ -34,6 +35,26 @@ export default function App() {
   // Places catalog state
   const [places, setPlaces] = useState<Place[]>(INITIAL_PLACES);
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
+
+  // Centralized place selection handler to synchronize workspace section & map selection
+  const handleSelectPlace = (place: Place | null) => {
+    setSelectedPlace(place);
+
+    if (place) {
+      if (activeSection !== 'explore') {
+        setPreviousSection(activeSection);
+      }
+      setActiveSection('explore');
+    }
+  };
+
+  const handleReturnToPreviousSection = () => {
+    setSelectedPlace(null);
+    if (previousSection) {
+      setActiveSection(previousSection);
+      setPreviousSection(null);
+    }
+  };
 
   // Trips persistence state
   const [savedTrips, setSavedTrips] = useState<TripItinerary[]>(() => {
@@ -117,6 +138,7 @@ export default function App() {
     });
     setActiveView('workspace');
     setActiveSection('overview');
+    setPreviousSection(null);
     setSelectedPlace(null);
     setSelectedDayNumber(null);
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -126,6 +148,7 @@ export default function App() {
     setCurrentTrip(trip);
     setActiveView('workspace');
     setActiveSection('overview');
+    setPreviousSection(null);
     setSelectedPlace(null);
     setSelectedDayNumber(null);
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -142,9 +165,15 @@ export default function App() {
   // SYNCHRONIZED TRIP ACTIVITIES HANDLERS
   // ==========================================
 
-  // 1. Add Place to Day
+  // 1. Add Place to Day (prevents duplicates in the same day)
   const handleAddPlaceToDay = (place: Place, dayNumber: number) => {
     if (!currentTrip) return;
+
+    // Verificar si ya existe este lugar en el día seleccionado para no duplicar
+    const alreadyExists = currentTrip.activities.some(
+      (a) => a.placeId === place.id && a.dayNumber === dayNumber
+    );
+    if (alreadyExists) return;
 
     const dayActivities = currentTrip.activities.filter((a) => a.dayNumber === dayNumber);
     const order = dayActivities.length + 1;
@@ -381,7 +410,7 @@ export default function App() {
             {/* Contenedor de Planificación (Sidebar + Contenido Central) */}
             <div
               className={`h-full min-h-0 ${
-                mobileTab === 'content' ? 'flex flex-1 min-w-0' : 'hidden'
+                mobileTab === 'content' ? 'flex flex-col md:flex-row flex-1 min-w-0' : 'hidden'
               } lg:flex ${isMapCollapsed ? 'flex-1 min-w-0' : 'lg:flex-initial min-w-0'} transition-all z-10 shrink-0`}
             >
               {/* Barra lateral de navegación */}
@@ -390,6 +419,7 @@ export default function App() {
                 activeSection={activeSection}
                 onSelectSection={(section) => {
                   setActiveSection(section);
+                  setPreviousSection(null);
                   window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
                 }}
                 selectedDayNumber={selectedDayNumber}
@@ -402,7 +432,7 @@ export default function App() {
                 trip={currentTrip}
                 places={places}
                 selectedPlace={selectedPlace}
-                onSelectPlace={setSelectedPlace}
+                onSelectPlace={handleSelectPlace}
                 activeSection={activeSection}
                 selectedDayNumber={selectedDayNumber}
                 onSelectDayNumber={setSelectedDayNumber}
@@ -414,6 +444,8 @@ export default function App() {
                 onAddManualActivity={handleAddManualActivity}
                 onUpdateNotes={handleUpdateNotes}
                 isMapCollapsed={isMapCollapsed}
+                previousSection={previousSection}
+                onReturnToPreviousSection={handleReturnToPreviousSection}
               />
             </div>
 
@@ -427,13 +459,15 @@ export default function App() {
                 trip={currentTrip}
                 places={places}
                 selectedPlace={selectedPlace}
-                onSelectPlace={setSelectedPlace}
+                onSelectPlace={handleSelectPlace}
                 onAddPlaceToDay={(place, day) => handleAddPlaceToDay(place, day)}
                 onRemoveActivity={handleRemoveActivity}
                 onToggleSavePlace={handleToggleSavePlace}
                 selectedDayNumber={selectedDayNumber}
                 isCollapsed={isMapCollapsed}
                 onToggleCollapse={() => setIsMapCollapsed((prev) => !prev)}
+                mobileTab={mobileTab}
+                onSwitchToContent={() => setMobileTab('content')}
               />
             </div>
           </div>

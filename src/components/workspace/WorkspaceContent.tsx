@@ -39,6 +39,8 @@ interface WorkspaceContentProps {
   onAddManualActivity: (dayNumber: number, title: string, timeSlot?: string, notes?: string) => void;
   onUpdateNotes: (notes: string) => void;
   isMapCollapsed?: boolean;
+  previousSection?: WorkspaceSection | null;
+  onReturnToPreviousSection?: () => void;
 }
 
 const CATEGORIES: { id: PlaceCategory | 'todas'; label: string }[] = [
@@ -67,6 +69,8 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   onAddManualActivity,
   onUpdateNotes,
   isMapCollapsed = false,
+  previousSection,
+  onReturnToPreviousSection,
 }) => {
   // Búsqueda y categoría para Explorar
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -234,56 +238,65 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
         ref={scrollContainerRef}
         className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col overflow-hidden select-none`}
       >
-        {/* Cabecera de búsqueda y métrica explícita */}
-        <div className="p-4 border-b border-[#E9EEF4] space-y-3 bg-white shrink-0">
-          <div className="flex items-center justify-between">
+        {/* Cabecera de búsqueda con jerarquía turística premium */}
+        <div className="p-3.5 sm:p-4 border-b border-[#E9EEF4] space-y-3 bg-white shrink-0">
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <h2 className="text-sm font-bold font-display text-[#17243A]">
+              <h2 className="text-base sm:text-lg font-bold font-display text-[#17243A] tracking-tight leading-snug">
                 Explorar {trip.destinationName}
               </h2>
-              {/* Diferenciación clara de resultados vs total */}
-              <p className="text-[11px] text-[#64748B] mt-0.5">
-                Mostrando <strong className="text-[#17243A]">{filteredPlaces.length}</strong> de <strong className="text-[#17243A]">{places.length}</strong> lugares disponibles
+              {/* Contador de resultados con menor protagonismo */}
+              <p className="text-xs text-[#64748B] mt-0.5">
+                {filteredPlaces.length} de {places.length} experiencias disponibles
               </p>
             </div>
-            <span className="text-[10px] font-mono font-medium text-[#64748B] bg-[#F7F8FA] px-2 py-1 rounded border border-[#E9EEF4]">
-              {savedPlaces.length} guardados
-            </span>
+
+            {/* Indicador de lugares guardados más discreto */}
+            {savedPlaces.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {}}
+                className="flex items-center gap-1.5 text-[11px] font-medium text-[#64748B] bg-[#F8FAFC] border border-[#E2E8F0] px-2.5 py-1 rounded-lg shrink-0"
+              >
+                <Bookmark className="w-3 h-3 text-[#D97706] fill-[#D97706]" />
+                <span>{savedPlaces.length} guardados</span>
+              </button>
+            )}
           </div>
 
-          {/* Buscador */}
+          {/* Buscador de ancho completo con altura táctil cómoda */}
           <div className="relative">
-            <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={`Buscar en ${trip.destinationName} (ceviche, huacas, museos, playa)...`}
-              className="w-full pl-9 pr-8 py-2 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] placeholder:text-[#64748B]/60 focus:outline-none focus:border-[#17243A] transition-colors"
+              placeholder={`Buscar en ${trip.destinationName} (ceviche, huacas, surf, museos)...`}
+              className="w-full h-11 sm:h-10 pl-10 pr-9 text-xs sm:text-sm bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#17243A] placeholder:text-[#94A3B8] focus:bg-white focus:outline-none focus:border-[#E85B49] focus:ring-2 focus:ring-[#E85B49]/15 transition-all shadow-2xs"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
                 title="Limpiar búsqueda"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {/* Chips de Categorías */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+          {/* Separación visual y Chips de Categorías deslizables */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth pt-0.5 pb-0.5">
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
                 type="button"
                 onClick={() => setSelectedCategory(cat.id)}
-                className={`px-2.5 py-1 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer shrink-0 ${
+                className={`px-3 py-1.5 text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer shrink-0 font-medium ${
                   selectedCategory === cat.id
-                    ? 'bg-[#17243A] text-white font-medium'
-                    : 'bg-[#F7F8FA] text-[#64748B] hover:text-[#17243A] hover:bg-[#E9EEF4]'
+                    ? 'bg-[#17243A] text-white shadow-xs font-semibold'
+                    : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/80'
                 }`}
               >
                 {cat.label}
@@ -294,28 +307,42 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
         {/* Vista Detallada de un Lugar (cuando está seleccionado) */}
         {selectedPlace ? (
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#F7F8FA]/50">
+          <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-3.5 bg-[#F8FAFC]">
             <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => onSelectPlace(null)}
-                className="text-xs text-[#64748B] hover:text-[#17243A] font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                ← Volver al listado
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelectPlace(null)}
+                  className="text-xs text-[#64748B] hover:text-[#17243A] font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  ← Volver al catálogo
+                </button>
+                {previousSection && previousSection !== 'explore' && onReturnToPreviousSection && (
+                  <>
+                    <span className="text-slate-300">·</span>
+                    <button
+                      type="button"
+                      onClick={onReturnToPreviousSection}
+                      className="text-xs text-[#E85B49] hover:underline font-medium cursor-pointer"
+                    >
+                      Volver a {previousSection === 'overview' ? 'Resumen' : previousSection === 'itinerary' ? 'Itinerario' : previousSection === 'saved' ? 'Por visitar' : 'Notas'}
+                    </button>
+                  </>
+                )}
+              </div>
               {selectedPlace.verification.isVerified && (
                 <span className="text-[10px] text-[#27856C] bg-[#27856C]/10 px-2 py-0.5 rounded font-medium flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" />
                   {selectedPlace.verification.verificationLevel === 'official_mincetur'
                     ? 'MINCETUR Oficial'
-                    : 'Verificado La Libertad'}
+                    : 'Verificado'}
                 </span>
               )}
             </div>
 
             <div className="bg-white rounded-xl border border-[#E9EEF4] overflow-hidden shadow-xs">
               {/* Fotografía de alta calidad con PlaceImage y fallback editorial */}
-              <div className="relative h-48 bg-slate-100">
+              <div className="relative h-44 sm:h-52 bg-slate-100">
                 <PlaceImage
                   src={selectedPlace.images[0]?.url}
                   alt={selectedPlace.name}
@@ -347,7 +374,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                   {selectedPlace.fullDescription || selectedPlace.shortDescription}
                 </p>
 
-                <div className="pt-2 border-t border-[#E9EEF4] space-y-1 text-xs text-[#64748B]">
+                <div className="pt-2 border-t border-[#E9EEF4] space-y-1.5 text-xs text-[#64748B]">
                   <div className="flex items-center gap-2">
                     <MapPin className="w-3.5 h-3.5 shrink-0 text-[#E85B49]" />
                     <span>{selectedPlace.address}</span>
@@ -366,12 +393,12 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                   )}
                 </div>
 
-                {/* Acciones de la Ficha */}
+                {/* Acciones de la Ficha adaptadas para mobile */}
                 <div className="pt-3 border-t border-[#E9EEF4] flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => onToggleSavePlace(selectedPlace.id)}
-                    className="p-2 border border-[#E9EEF4] rounded-lg text-[#17243A] hover:bg-[#F7F8FA] cursor-pointer"
+                    className="p-2.5 border border-[#E2E8F0] rounded-xl text-[#17243A] hover:bg-[#F8FAFC] active:scale-95 transition-all cursor-pointer"
                     title={
                       trip.savedPlaceIds?.includes(selectedPlace.id)
                         ? 'Quitar de lugares para visitar'
@@ -387,26 +414,37 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                     />
                   </button>
 
-                  <div className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  <div className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
                     <span className="text-xs text-[#64748B] shrink-0 font-medium">Añadir a:</span>
-                    {dayItems.map((d) => (
-                      <button
-                        key={d.dayNumber}
-                        type="button"
-                        onClick={() => onAddPlaceToDay(selectedPlace, d.dayNumber)}
-                        className="px-2.5 py-1 text-xs bg-[#17243A] text-white hover:bg-slate-800 rounded-lg font-mono font-medium cursor-pointer shrink-0"
-                      >
-                        Día {d.dayNumber}
-                      </button>
-                    ))}
+                    {dayItems.map((d) => {
+                      const isAlreadyInDay = trip.activities.some(
+                        (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                      );
+                      return (
+                        <button
+                          key={d.dayNumber}
+                          type="button"
+                          disabled={isAlreadyInDay}
+                          onClick={() => onAddPlaceToDay(selectedPlace, d.dayNumber)}
+                          className={`px-3 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 transition-all ${
+                            isAlreadyInDay
+                              ? 'bg-emerald-600 text-white cursor-default opacity-95'
+                              : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 cursor-pointer shadow-2xs'
+                          }`}
+                          title={isAlreadyInDay ? `Ya está en Día ${d.dayNumber}` : `Añadir a Día ${d.dayNumber}`}
+                        >
+                          {isAlreadyInDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
             </div>
           </div>
         ) : (
-          /* Lista de Tarjetas de Lugares */
-          <div className="flex-1 overflow-y-auto p-4">
+          /* Lista de Tarjetas de Lugares adaptadas al ancho móvil */
+          <div className="flex-1 overflow-y-auto p-3 sm:p-4">
             <div className={`grid grid-cols-1 ${isMapCollapsed ? 'md:grid-cols-2 xl:grid-cols-3' : ''} gap-3`}>
               {filteredPlaces.map((place) => {
                 const isSaved = trip.savedPlaceIds?.includes(place.id);
@@ -417,33 +455,34 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                   <div
                     key={place.id}
                     onClick={() => onSelectPlace(place)}
-                    className="bg-white rounded-xl border border-[#E9EEF4] hover:border-slate-300 p-3 transition-colors cursor-pointer group flex flex-col justify-between"
+                    className="bg-white rounded-xl border border-[#E9EEF4] hover:border-[#CBD5E1] p-3 sm:p-3.5 transition-all cursor-pointer group flex flex-col justify-between shadow-2xs hover:shadow-xs"
                   >
                     <div>
                       <div className="flex gap-3">
-                        <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-slate-100">
+                        {/* Thumbnail equilibrado para pantallas móviles */}
+                        <div className="w-18 h-18 sm:w-20 sm:h-20 rounded-xl overflow-hidden shrink-0 bg-slate-100 border border-slate-100">
                           <PlaceImage
                             src={place.images[0]?.url}
                             alt={place.name}
                             category={place.category}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           />
                         </div>
 
                         <div className="flex-1 min-w-0 flex flex-col justify-between">
                           <div>
-                            <div className="flex items-center justify-between gap-1">
-                              <h4 className="text-xs font-bold text-[#17243A] group-hover:text-[#E85B49] transition-colors truncate">
+                            <div className="flex items-start justify-between gap-1.5">
+                              <h4 className="text-xs sm:text-sm font-bold text-[#17243A] group-hover:text-[#E85B49] transition-colors leading-snug line-clamp-1">
                                 {place.name}
                               </h4>
                               {activity && (
-                                <span className="text-[10px] font-semibold text-white bg-[#E85B49] px-1.5 py-0.2 rounded shrink-0">
+                                <span className="text-[10px] font-semibold text-white bg-[#E85B49] px-1.5 py-0.2 rounded shrink-0 leading-tight">
                                   Día {activity.dayNumber}
                                 </span>
                               )}
                             </div>
 
-                            <div className="flex items-center gap-1.5 text-[11px] text-[#64748B] mt-0.5">
+                            <div className="flex items-center gap-1.5 text-[11px] text-[#64748B] mt-1">
                               {place.rating && (
                                 <span className="flex items-center gap-0.5 text-amber-600 font-semibold">
                                   <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
@@ -462,22 +501,24 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 mt-2 border-t border-[#E9EEF4]/70 text-xs">
-                      <span className="text-[10px] text-[#64748B] bg-[#F7F8FA] px-1.5 py-0.5 rounded border border-[#E9EEF4]">
+                    {/* Barra inferior de acciones con touch target cómodo */}
+                    <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-[#F1F5F9] text-xs">
+                      <span className="text-[10px] text-[#27856C] bg-[#27856C]/8 px-2 py-0.5 rounded-md font-medium">
                         {place.verification.verificationLevel === 'official_mincetur'
                           ? 'MINCETUR'
                           : 'Verificado'}
                       </span>
 
-                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
                           onClick={() => onToggleSavePlace(place.id)}
-                          className="p-1 text-[#64748B] hover:text-[#17243A] cursor-pointer"
+                          className="p-1.5 text-[#64748B] hover:text-[#17243A] hover:bg-[#F8FAFC] rounded-lg transition-colors cursor-pointer"
                           title={isSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
+                          aria-label={isSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
                         >
                           <Bookmark
-                            className={`w-3.5 h-3.5 ${
+                            className={`w-4 h-4 ${
                               isSaved ? 'fill-[#D97706] text-[#D97706]' : ''
                             }`}
                           />
@@ -486,22 +527,22 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                         <button
                           type="button"
                           onClick={() => setActiveDayPickerPlaceId(isDayPickerOpen ? null : place.id)}
-                          className="text-xs font-semibold text-[#17243A] hover:text-[#E85B49] flex items-center gap-0.5 cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-semibold text-[#17243A] hover:text-white hover:bg-[#17243A] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
                         >
                           <span>+ Añadir</span>
-                          <ChevronRight className="w-3 h-3" />
+                          <ChevronRight className="w-3 h-3 opacity-60" />
                         </button>
                       </div>
                     </div>
 
-                    {/* Selector emergente de día */}
+                    {/* Selector emergente de día asignable */}
                     {isDayPickerOpen && (
                       <div
-                        className="mt-2 pt-2 border-t border-[#E9EEF4] flex items-center justify-between text-xs"
+                        className="mt-2.5 pt-2.5 border-t border-[#E9EEF4] flex items-center justify-between text-xs animate-in fade-in duration-100"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <span className="text-[#64748B] text-[11px]">Asignar:</span>
-                        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                        <span className="text-[#64748B] text-[11px] font-medium">Asignar a:</span>
+                        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth">
                           {dayItems.map((d) => (
                             <button
                               key={d.dayNumber}
@@ -510,7 +551,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                                 onAddPlaceToDay(place, d.dayNumber);
                                 setActiveDayPickerPlaceId(null);
                               }}
-                              className="px-2 py-0.5 bg-[#F7F8FA] hover:bg-[#17243A] hover:text-white border border-[#E9EEF4] text-[#17243A] font-mono text-[11px] rounded cursor-pointer transition-colors"
+                              className="px-2.5 py-1 bg-[#F8FAFC] hover:bg-[#17243A] hover:text-white border border-[#E2E8F0] text-[#17243A] font-mono font-medium text-[11px] rounded-lg cursor-pointer transition-colors"
                             >
                               D{d.dayNumber}
                             </button>
@@ -524,7 +565,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             </div>
 
             {filteredPlaces.length === 0 && (
-              <div className="text-center py-12 px-4 border border-dashed border-[#E9EEF4] rounded-xl text-xs text-[#64748B]">
+              <div className="text-center py-12 px-4 border border-dashed border-[#E9EEF4] rounded-xl text-xs text-[#64748B] bg-white">
                 No se encontraron lugares en {trip.destinationName} para este filtro.
               </div>
             )}
