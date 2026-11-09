@@ -27,6 +27,7 @@ import {
   matchesCategory,
   matchesSearchQuery,
 } from '../../utils/filterUtils.ts';
+import { ItineraryView } from './ItineraryView.tsx';
 
 interface WorkspaceContentProps {
   trip: TripItinerary;
@@ -34,12 +35,15 @@ interface WorkspaceContentProps {
   selectedPlace: Place | null;
   onSelectPlace: (place: Place | null) => void;
   activeSection: WorkspaceSection;
+  onSelectSection?: (section: WorkspaceSection) => void;
   selectedDayNumber: number | null;
   onSelectDayNumber: (day: number | null) => void;
   onAddPlaceToDay: (place: Place, dayNumber: number) => void;
   onToggleSavePlace: (placeId: string) => void;
   onRemoveActivity: (activityId: string) => void;
   onMoveActivityToDay: (activityId: string, targetDayNumber: number) => void;
+  onMoveActivityPosition?: (activityId: string, targetDayNumber: number, targetIndex: number) => void;
+  onReorderActivitiesForDay?: (dayNumber: number, orderedActivityIds: string[]) => void;
   onReorderActivity: (activityId: string, direction: 'up' | 'down') => void;
   onAddManualActivity: (dayNumber: number, title: string, timeSlot?: string, notes?: string) => void;
   onUpdateNotes: (notes: string) => void;
@@ -58,12 +62,15 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   selectedPlace,
   onSelectPlace,
   activeSection,
+  onSelectSection,
   selectedDayNumber,
   onSelectDayNumber,
   onAddPlaceToDay,
   onToggleSavePlace,
   onRemoveActivity,
   onMoveActivityToDay,
+  onMoveActivityPosition,
+  onReorderActivitiesForDay,
   onReorderActivity,
   onAddManualActivity,
   onUpdateNotes,
@@ -86,12 +93,22 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
   // Ref para garantizar que cada sección comience desde arriba
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const categoryContainerRef = useRef<HTMLDivElement>(null);
+  const categoryButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   useEffect(() => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
     }
   }, [activeSection, trip.id]);
+
+  // Mantener visible el filtro de categoría seleccionado al desplazarse
+  useEffect(() => {
+    const activeChip = categoryButtonsRef.current.get(selectedCategory);
+    if (activeChip && categoryContainerRef.current) {
+      activeChip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }, [selectedCategory]);
 
   const dayItems: TripDayItem[] = useMemo(() => {
     return generateDayList(trip.startDate, trip.totalDays);
@@ -244,7 +261,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
     return (
       <div
         ref={scrollContainerRef}
-        className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col overflow-hidden select-none`}
+        className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col overflow-hidden`}
       >
         {/* Cabecera de búsqueda con jerarquía turística premium */}
         <div className="p-3.5 sm:p-4 border-b border-[#E9EEF4] space-y-3 bg-white shrink-0">
@@ -294,14 +311,22 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
             )}
           </div>
 
-          {/* Separación visual y Chips de Categorías deslizables */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth pt-0.5 pb-0.5">
+          {/* Separación visual y Chips de Categorías deslizables con soporte táctil fluido */}
+          <div
+            ref={categoryContainerRef}
+            className="flex items-center gap-1.5 overflow-x-auto flex-nowrap no-scrollbar touch-pan-x overscroll-x-contain pt-0.5 pb-0.5"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
             {FILTER_CATEGORIES.map((cat) => (
               <button
+                ref={(el) => {
+                  if (el) categoryButtonsRef.current.set(cat.id, el);
+                  else categoryButtonsRef.current.delete(cat.id);
+                }}
                 key={cat.id}
                 type="button"
                 onClick={() => onCategoryChange?.(cat.id)}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer shrink-0 font-medium flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer shrink-0 flex-shrink-0 font-medium flex items-center gap-1.5 ${
                   selectedCategory === cat.id
                     ? 'bg-[#17243A] text-white shadow-xs font-semibold'
                     : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/80'
@@ -611,227 +636,30 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   }
 
   // ==========================================
-  // SECCIÓN 3: ITINERARIO POR DÍAS
+  // SECCIÓN 3: ITINERARIO POR DÍAS (PHASE 3)
   // ==========================================
   if (activeSection === 'itinerary') {
-    const daysToShow = selectedDayNumber
-      ? dayItems.filter((d) => d.dayNumber === selectedDayNumber)
-      : dayItems;
-
     return (
       <div
         ref={scrollContainerRef}
-        className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col p-4 overflow-y-auto select-none`}
+        className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9EEF4] flex flex-col overflow-hidden select-none`}
       >
-        <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#E9EEF4]">
-          <div>
-            <h2 className="text-sm font-bold font-display text-[#17243A]">
-              {selectedDayNumber ? `Día ${selectedDayNumber}` : 'Itinerario de viaje'}
-            </h2>
-            <span className="text-xs text-[#64748B]">
-              <strong className="text-[#17243A]">{trip.activities.length}</strong> actividades en <strong className="text-[#17243A]">{trip.totalDays}</strong> días
-            </span>
-          </div>
-
-          {selectedDayNumber && (
-            <button
-              type="button"
-              onClick={() => onSelectDayNumber(null)}
-              className="text-xs font-semibold text-[#E85B49] hover:underline cursor-pointer"
-            >
-              Ver todos los días
-            </button>
-          )}
-        </div>
-
-        <div className={`space-y-4 ${isMapCollapsed ? 'max-w-4xl' : ''}`}>
-          {daysToShow.map((day) => {
-            const dayActs = trip.activities
-              .filter((a) => a.dayNumber === day.dayNumber)
-              .sort((a, b) => a.order - b.order);
-
-            return (
-              <div
-                key={day.dayNumber}
-                className="border border-[#E9EEF4] rounded-xl overflow-hidden bg-white shadow-2xs"
-              >
-                {/* Cabecera del día */}
-                <div className="flex items-center justify-between p-3 bg-[#F7F8FA] border-b border-[#E9EEF4]">
-                  <div>
-                    <span className="text-xs font-bold text-[#17243A] block">
-                      {day.label} · {day.formattedDate}
-                    </span>
-                    <span className="text-[11px] text-[#64748B]">
-                      {dayActs.length} {dayActs.length === 1 ? 'actividad' : 'actividades'}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setManualFormDay(manualFormDay === day.dayNumber ? null : day.dayNumber)}
-                    className="flex items-center gap-1 px-2.5 py-1 text-xs text-[#17243A] bg-white border border-[#E9EEF4] hover:bg-[#F7F8FA] rounded-lg transition-colors cursor-pointer font-medium"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>+ Actividad</span>
-                  </button>
-                </div>
-
-                {/* Formulario de Actividad Manual */}
-                {manualFormDay === day.dayNumber && (
-                  <form
-                    onSubmit={(e) => handleCreateManual(e, day.dayNumber)}
-                    className="p-3 bg-[#F7F8FA] border-b border-[#E9EEF4] space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-[#17243A]">Nueva actividad manual</span>
-                      <button
-                        type="button"
-                        onClick={() => setManualFormDay(null)}
-                        className="text-[#64748B] hover:text-[#17243A]"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <input
-                      type="text"
-                      placeholder="Ej. Desayuno en Plaza Mayor, Paseo en caballitos de totora"
-                      value={manualTitle}
-                      onChange={(e) => setManualTitle(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9EEF4] rounded-lg text-[#17243A] focus:outline-none focus:border-[#17243A]"
-                      autoFocus
-                      required
-                    />
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        placeholder="Hora (ej. 10:00)"
-                        value={manualTime}
-                        onChange={(e) => setManualTime(e.target.value)}
-                        className="px-2.5 py-1 text-xs bg-white border border-[#E9EEF4] rounded-lg text-[#17243A] focus:outline-none"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Notas breves"
-                        value={manualNotes}
-                        onChange={(e) => setManualNotes(e.target.value)}
-                        className="px-2.5 py-1 text-xs bg-white border border-[#E9EEF4] rounded-lg text-[#17243A] focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setManualFormDay(null)}
-                        className="px-2.5 py-1 text-xs text-[#64748B] hover:text-[#17243A] cursor-pointer"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        className="px-3 py-1 text-xs font-medium text-white bg-[#17243A] hover:bg-slate-800 rounded-lg cursor-pointer"
-                      >
-                        Guardar
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                {/* Lista de actividades */}
-                <div className="p-2 space-y-1.5">
-                  {dayActs.length === 0 ? (
-                    <div className="text-center py-4 text-xs text-[#64748B]">
-                      Sin actividades para este día. Añade lugares desde Explorar o pulsa + Actividad.
-                    </div>
-                  ) : (
-                    dayActs.map((act, idx) => (
-                      <div
-                        key={act.id}
-                        className="flex items-start justify-between p-2.5 rounded-lg border border-[#E9EEF4] hover:bg-[#F7F8FA] transition-colors"
-                      >
-                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                          {/* Badge de orden correlativo numerado Wanderlog */}
-                          <span className="w-5 h-5 rounded-full bg-[#E85B49] text-white text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
-                            {idx + 1}
-                          </span>
-                          <div className="min-w-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (act.place) onSelectPlace(act.place);
-                              }}
-                              className="text-xs font-bold text-[#17243A] hover:text-[#E85B49] text-left truncate block cursor-pointer"
-                            >
-                              {act.customTitle || act.place?.name || 'Actividad'}
-                            </button>
-                            <div className="flex items-center gap-1.5 text-[11px] text-[#64748B]">
-                              <span>{act.timeSlot || 'Horario flexible'}</span>
-                              {act.place && (
-                                <>
-                                  <span>·</span>
-                                  <span className="capitalize">{act.place.category}</span>
-                                </>
-                              )}
-                            </div>
-                            {act.notes && (
-                              <p className="text-[11px] text-[#475569] mt-1 bg-white p-1 rounded border border-[#E9EEF4]">
-                                {act.notes}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Controles de orden y eliminación */}
-                        <div className="flex items-center gap-1 shrink-0 ml-2">
-                          <select
-                            value={act.dayNumber}
-                            onChange={(e) => onMoveActivityToDay(act.id, Number(e.target.value))}
-                            aria-label="Mover a otro día"
-                            className="text-[11px] bg-white border border-[#E9EEF4] rounded px-1 py-0.5 text-[#64748B] outline-none"
-                          >
-                            {dayItems.map((d) => (
-                              <option key={d.dayNumber} value={d.dayNumber}>
-                                {d.label}
-                              </option>
-                            ))}
-                          </select>
-
-                          <button
-                            type="button"
-                            disabled={idx === 0}
-                            onClick={() => onReorderActivity(act.id, 'up')}
-                            className="p-1 text-[#64748B] hover:text-[#17243A] disabled:opacity-20 cursor-pointer"
-                            title="Subir orden"
-                          >
-                            <ArrowUp className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === dayActs.length - 1}
-                            onClick={() => onReorderActivity(act.id, 'down')}
-                            className="p-1 text-[#64748B] hover:text-[#17243A] disabled:opacity-20 cursor-pointer"
-                            title="Bajar orden"
-                          >
-                            <ArrowDown className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onRemoveActivity(act.id)}
-                            className="p-1 text-[#64748B] hover:text-rose-600 cursor-pointer"
-                            title="Quitar actividad"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <ItineraryView
+          trip={trip}
+          places={places}
+          selectedPlace={selectedPlace}
+          onSelectPlace={onSelectPlace}
+          selectedDayNumber={selectedDayNumber}
+          onSelectDayNumber={onSelectDayNumber}
+          onRemoveActivity={onRemoveActivity}
+          onMoveActivityToDay={onMoveActivityToDay}
+          onMoveActivityPosition={onMoveActivityPosition}
+          onReorderActivitiesForDay={onReorderActivitiesForDay}
+          onReorderActivity={onReorderActivity}
+          onAddManualActivity={onAddManualActivity}
+          onNavigateToExplore={() => onSelectSection?.('explore')}
+          isMapCollapsed={isMapCollapsed}
+        />
       </div>
     );
   }

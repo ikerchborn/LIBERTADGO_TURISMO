@@ -15,6 +15,12 @@ import { MapPanel } from './components/workspace/MapPanel.tsx';
 import { INITIAL_PLACES } from './data/initialPlaces.ts';
 import { TripItinerary, Place, TripActivity } from './types/catalog.ts';
 import { matchesCategory, matchesSearchQuery } from './utils/filterUtils.ts';
+import {
+  addPlaceToDay,
+  removeActivityAndReindex,
+  reorderDayActivities,
+  moveActivityToDayAndIndex,
+} from './utils/itineraryUtils.ts';
 
 const STORAGE_TRIPS_KEY = 'libertadgo_trips_v2';
 const STORAGE_ACTIVE_ID_KEY = 'libertadgo_active_trip_id_v2';
@@ -187,36 +193,19 @@ export default function App() {
   };
 
   // ==========================================
-  // SYNCHRONIZED TRIP ACTIVITIES HANDLERS
+  // SYNCHRONIZED TRIP ACTIVITIES HANDLERS (PHASE 3)
   // ==========================================
 
   // 1. Add Place to Day (prevents duplicates in the same day)
   const handleAddPlaceToDay = (place: Place, dayNumber: number) => {
     if (!currentTrip) return;
 
-    // Verificar si ya existe este lugar en el día seleccionado para no duplicar
-    const alreadyExists = currentTrip.activities.some(
-      (a) => a.placeId === place.id && a.dayNumber === dayNumber
-    );
-    if (alreadyExists) return;
-
-    const dayActivities = currentTrip.activities.filter((a) => a.dayNumber === dayNumber);
-    const order = dayActivities.length + 1;
-
-    const newActivity: TripActivity = {
-      id: `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      tripId: currentTrip.id,
-      placeId: place.id,
-      place,
-      dayNumber,
-      order,
-      isVisited: false,
-      createdAt: new Date().toISOString(),
-    };
+    const result = addPlaceToDay(currentTrip.activities, currentTrip.id, place, dayNumber);
+    if (!result.added) return;
 
     const updatedTrip: TripItinerary = {
       ...currentTrip,
-      activities: [...currentTrip.activities, newActivity],
+      activities: result.activities,
       updatedAt: new Date().toISOString(),
     };
 
@@ -246,25 +235,14 @@ export default function App() {
     setSavedTrips((prev) => prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t)));
   };
 
-  // 3. Remove Activity from Trip
+  // 3. Remove Activity from Trip (preserves catalog & other days)
   const handleRemoveActivity = (activityId: string) => {
     if (!currentTrip) return;
 
-    const activityToRemove = currentTrip.activities.find((a) => a.id === activityId);
-    if (!activityToRemove) return;
-
-    const remainingActivities = currentTrip.activities.filter((a) => a.id !== activityId);
-
-    const reindexedActivities = remainingActivities.map((a) => {
-      if (a.dayNumber === activityToRemove.dayNumber && a.order > activityToRemove.order) {
-        return { ...a, order: a.order - 1 };
-      }
-      return a;
-    });
-
+    const updatedActivities = removeActivityAndReindex(currentTrip.activities, activityId);
     const updatedTrip: TripItinerary = {
       ...currentTrip,
-      activities: reindexedActivities,
+      activities: updatedActivities,
       updatedAt: new Date().toISOString(),
     };
 
@@ -276,20 +254,11 @@ export default function App() {
   const handleMoveActivityToDay = (activityId: string, targetDayNumber: number) => {
     if (!currentTrip) return;
 
-    const activity = currentTrip.activities.find((a) => a.id === activityId);
-    if (!activity || activity.dayNumber === targetDayNumber) return;
-
-    const targetDayCount = currentTrip.activities.filter((a) => a.dayNumber === targetDayNumber).length;
-
-    const updatedActivities = currentTrip.activities.map((a) => {
-      if (a.id === activityId) {
-        return { ...a, dayNumber: targetDayNumber, order: targetDayCount + 1 };
-      }
-      if (a.dayNumber === activity.dayNumber && a.order > activity.order) {
-        return { ...a, order: a.order - 1 };
-      }
-      return a;
-    });
+    const updatedActivities = moveActivityToDayAndIndex(
+      currentTrip.activities,
+      activityId,
+      targetDayNumber
+    );
 
     const updatedTrip: TripItinerary = {
       ...currentTrip,
@@ -301,7 +270,52 @@ export default function App() {
     setSavedTrips((prev) => prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t)));
   };
 
-  // 5. Reorder Activity within Day
+  // 5. Drag and Drop: Move Activity to target day & specific index
+  const handleMoveActivityPosition = (
+    activityId: string,
+    targetDayNumber: number,
+    targetIndex: number
+  ) => {
+    if (!currentTrip) return;
+
+    const updatedActivities = moveActivityToDayAndIndex(
+      currentTrip.activities,
+      activityId,
+      targetDayNumber,
+      targetIndex
+    );
+
+    const updatedTrip: TripItinerary = {
+      ...currentTrip,
+      activities: updatedActivities,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setCurrentTrip(updatedTrip);
+    setSavedTrips((prev) => prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t)));
+  };
+
+  // 6. Reorder activities within a day using ordered ID list
+  const handleReorderActivitiesForDay = (dayNumber: number, orderedActivityIds: string[]) => {
+    if (!currentTrip) return;
+
+    const updatedActivities = reorderDayActivities(
+      currentTrip.activities,
+      dayNumber,
+      orderedActivityIds
+    );
+
+    const updatedTrip: TripItinerary = {
+      ...currentTrip,
+      activities: updatedActivities,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setCurrentTrip(updatedTrip);
+    setSavedTrips((prev) => prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t)));
+  };
+
+  // 7. Step Reorder Activity within Day (Up/Down)
   const handleReorderActivity = (activityId: string, direction: 'up' | 'down') => {
     if (!currentTrip) return;
 
@@ -335,7 +349,7 @@ export default function App() {
     setSavedTrips((prev) => prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t)));
   };
 
-  // 6. Add Manual Activity
+  // 8. Add Manual Activity
   const handleAddManualActivity = (
     dayNumber: number,
     title: string,
@@ -369,7 +383,7 @@ export default function App() {
     setSavedTrips((prev) => prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t)));
   };
 
-  // 7. Update Notes
+  // 9. Update Notes
   const handleUpdateNotes = (notes: string) => {
     if (!currentTrip) return;
     const updatedTrip: TripItinerary = { ...currentTrip, notes, updatedAt: new Date().toISOString() };
@@ -459,12 +473,15 @@ export default function App() {
                 selectedPlace={selectedPlace}
                 onSelectPlace={handleSelectPlace}
                 activeSection={activeSection}
+                onSelectSection={setActiveSection}
                 selectedDayNumber={selectedDayNumber}
                 onSelectDayNumber={setSelectedDayNumber}
                 onAddPlaceToDay={handleAddPlaceToDay}
                 onToggleSavePlace={handleToggleSavePlace}
                 onRemoveActivity={handleRemoveActivity}
                 onMoveActivityToDay={handleMoveActivityToDay}
+                onMoveActivityPosition={handleMoveActivityPosition}
+                onReorderActivitiesForDay={handleReorderActivitiesForDay}
                 onReorderActivity={handleReorderActivity}
                 onAddManualActivity={handleAddManualActivity}
                 onUpdateNotes={handleUpdateNotes}
@@ -493,6 +510,9 @@ export default function App() {
                 onRemoveActivity={handleRemoveActivity}
                 onToggleSavePlace={handleToggleSavePlace}
                 selectedDayNumber={selectedDayNumber}
+                onSelectDayNumber={setSelectedDayNumber}
+                activeSection={activeSection}
+                onSelectSection={setActiveSection}
                 isCollapsed={isMapCollapsed}
                 onToggleCollapse={() => setIsMapCollapsed((prev) => !prev)}
                 mobileTab={mobileTab}

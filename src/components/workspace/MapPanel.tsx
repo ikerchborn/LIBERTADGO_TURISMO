@@ -31,7 +31,8 @@ import {
   Clock,
   AlertCircle,
   RefreshCw,
-  ChevronLeft
+  ChevronLeft,
+  Calendar
 } from 'lucide-react';
 import { PlaceImage } from '../common/PlaceImage.tsx';
 import {
@@ -39,6 +40,9 @@ import {
   matchesCategory,
   matchesSearchQuery,
 } from '../../utils/filterUtils.ts';
+import { getDayColor } from '../../utils/itineraryUtils.ts';
+import { calculateRealRoute, RouteData } from '../../utils/routingService.ts';
+import { WorkspaceSection } from './WorkspaceSidebar.tsx';
 
 interface MapPanelProps {
   trip: TripItinerary;
@@ -49,6 +53,9 @@ interface MapPanelProps {
   onRemoveActivity?: (activityId: string) => void;
   onToggleSavePlace?: (placeId: string) => void;
   selectedDayNumber?: number | null;
+  onSelectDayNumber?: (day: number | null) => void;
+  activeSection?: WorkspaceSection;
+  onSelectSection?: (section: WorkspaceSection) => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   mobileTab?: 'content' | 'map';
@@ -79,6 +86,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   onRemoveActivity,
   onToggleSavePlace,
   selectedDayNumber = null,
+  onSelectDayNumber,
+  activeSection = 'explore',
+  onSelectSection,
   isCollapsed = false,
   onToggleCollapse,
   mobileTab = 'content',
@@ -88,6 +98,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   searchQuery = '',
   onSearchChange,
 }) => {
+  const isItineraryMode = activeSection === 'itinerary';
+  const categoryScrollRef = useRef<HTMLDivElement>(null);
+  const dayTabsScrollRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -96,6 +109,19 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [showRoutes, setShowRoutes] = useState<boolean>(true);
+  const [routeStatus, setRouteStatus] = useState<{
+    isLoading: boolean;
+    data: RouteData | null;
+    dayNumber: number | null;
+    isUnavailable: boolean;
+    totalPoints: number;
+  }>({
+    isLoading: false,
+    data: null,
+    dayNumber: null,
+    isUnavailable: false,
+    totalPoints: 0,
+  });
 
   // Estados de Búsqueda y Filtros tipo Google Maps
   const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
@@ -314,7 +340,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               'line-cap': 'round',
             },
             paint: {
-              'line-color': '#E85B49',
+              'line-color': ['coalesce', ['get', 'color'], '#E85B49'],
               'line-width': 3.5,
               'line-dasharray': [1, 0],
             },
@@ -388,7 +414,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   }, [isCollapsed]);
 
-  // Actualizar trazado de ruta del itinerario
+  // Actualizar trazado de ruta del itinerario con cálculo real de carreteras (OSRM)
+  // Regla estricta: Jamás trazar líneas rectas ficticias. Si la ruta real no está disponible, mostrar aviso.
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !mapLoaded) return;
@@ -396,49 +423,173 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     const source = map.getSource('itinerary-route') as maplibregl.GeoJSONSource | undefined;
     if (!source) return;
 
-    const relevantActivities = trip.activities
-      .filter((a) => (selectedDayNumber ? a.dayNumber === selectedDayNumber : true))
-      .sort((a, b) => {
-        if (a.dayNumber !== b.dayNumber) return a.dayNumber - b.dayNumber;
-        return a.order - b.order;
-      });
+    let isCancelled = false;
 
-    const routeCoordinates: [number, number][] = [];
-    relevantActivities.forEach((act) => {
-      if (act.place?.coordinates) {
-        routeCoordinates.push([act.place.coordinates.lng, act.place.coordinates.lat]);
-      } else {
-        const found = places.find((p) => p.id === act.placeId);
-        if (found) {
-          routeCoordinates.push([found.coordinates.lng, found.coordinates.lat]);
-        }
+    async function updateItineraryRoutes() {
+      if (!source) return;
+
+      if (!isItineraryMode) {
+        // En MODO EXPLORAR no se dibujan líneas de itinerario para mantener el mapa despejado
+        source.setData({
+          type: 'FeatureCollection',
+          features: [],
+        });
+        setRouteStatus({
+          isLoading: false,
+          data: null,
+          dayNumber: null,
+          isUnavailable: false,
+          totalPoints: 0,
+        });
+        return;
       }
-    });
 
-    if (routeCoordinates.length >= 2 && showRoutes) {
-      source.setData({
-        type: 'FeatureCollection',
-        features: [
-          {
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: routeCoordinates,
-            },
-            properties: {},
-          },
-        ],
-      });
-    } else {
-      source.setData({
-        type: 'FeatureCollection',
-        features: [],
-      });
+      const features: {
+        type: 'Feature';
+        geometry: { type: 'LineString'; coordinates: [number, number][] };
+        properties: { color?: string };
+      }[] = [];
+
+      if (selectedDayNumber) {
+        // Modo Día individual: recorrido exclusivo de la jornada seleccionada
+        const dayActivities = trip.activities
+          .filter((a) => a.dayNumber === selectedDayNumber)
+          .sort((a, b) => a.order - b.order);
+
+        const routeCoordinates: [number, number][] = [];
+        dayActivities.forEach((act) => {
+          const place = act.place || places.find((p) => p.id === act.placeId);
+          if (place?.coordinates) {
+            routeCoordinates.push([place.coordinates.lng, place.coordinates.lat]);
+          }
+        });
+
+        if (routeCoordinates.length >= 2) {
+          setRouteStatus({
+            isLoading: true,
+            data: null,
+            dayNumber: selectedDayNumber,
+            isUnavailable: false,
+            totalPoints: routeCoordinates.length,
+          });
+
+          const realRoute = await calculateRealRoute(routeCoordinates);
+          if (isCancelled) return;
+
+          if (realRoute && realRoute.coordinates.length >= 2) {
+            features.push({
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: realRoute.coordinates,
+              },
+              properties: {
+                color: getDayColor(selectedDayNumber).bg,
+              },
+            });
+
+            setRouteStatus({
+              isLoading: false,
+              data: realRoute,
+              dayNumber: selectedDayNumber,
+              isUnavailable: false,
+              totalPoints: routeCoordinates.length,
+            });
+          } else {
+            // No se pudo calcular el recorrido vial real: no inventar líneas rectas
+            setRouteStatus({
+              isLoading: false,
+              data: null,
+              dayNumber: selectedDayNumber,
+              isUnavailable: true,
+              totalPoints: routeCoordinates.length,
+            });
+          }
+        } else {
+          // Menos de 2 puntos en este día: no hay ruta
+          setRouteStatus({
+            isLoading: false,
+            data: null,
+            dayNumber: selectedDayNumber,
+            isUnavailable: false,
+            totalPoints: routeCoordinates.length,
+          });
+        }
+      } else {
+        // Modo Todos los días: trazar rutas viales independientes por jornada
+        setRouteStatus({
+          isLoading: true,
+          data: null,
+          dayNumber: null,
+          isUnavailable: false,
+          totalPoints: 0,
+        });
+
+        for (const day of dayItems) {
+          const dayActivities = trip.activities
+            .filter((a) => a.dayNumber === day.dayNumber)
+            .sort((a, b) => a.order - b.order);
+
+          const routeCoordinates: [number, number][] = [];
+          dayActivities.forEach((act) => {
+            const place = act.place || places.find((p) => p.id === act.placeId);
+            if (place?.coordinates) {
+              routeCoordinates.push([place.coordinates.lng, place.coordinates.lat]);
+            }
+          });
+
+          if (routeCoordinates.length >= 2) {
+            const realRoute = await calculateRealRoute(routeCoordinates);
+            if (isCancelled) return;
+
+            if (realRoute && realRoute.coordinates.length >= 2) {
+              features.push({
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: realRoute.coordinates,
+                },
+                properties: {
+                  color: getDayColor(day.dayNumber).bg,
+                },
+              });
+            }
+          }
+        }
+
+        if (isCancelled) return;
+
+        setRouteStatus({
+          isLoading: false,
+          data: null,
+          dayNumber: null,
+          isUnavailable: false,
+          totalPoints: features.length,
+        });
+      }
+
+      if (features.length > 0 && showRoutes) {
+        source.setData({
+          type: 'FeatureCollection',
+          features,
+        });
+      } else {
+        source.setData({
+          type: 'FeatureCollection',
+          features: [],
+        });
+      }
     }
-  }, [trip.activities, places, mapLoaded, showRoutes, selectedDayNumber]);
+
+    updateItineraryRoutes();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [trip.activities, places, mapLoaded, showRoutes, selectedDayNumber, dayItems, isItineraryMode]);
 
   // ==========================================
-  // RENDERIZADO REACTIVO DE MARCADORES (FILTRADOS)
+  // RENDERIZADO REACTIVO DE MARCADORES (FASE 3)
   // ==========================================
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -447,80 +598,87 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    filteredPlaces.forEach((place) => {
-      const isSelected = selectedPlace?.id === place.id;
-      const isSaved = savedIds.has(place.id);
+    // Determinar qué lugares o actividades se deben renderizar según el Modo Contextual
+    const isSingleDayMode = selectedDayNumber !== null;
+    const renderedPlaceIds = new Set<string>();
 
-      const activityIndex = trip.activities.findIndex((a) => a.placeId === place.id);
-      const isItineraryItem = activityIndex !== -1;
-      const activity = isItineraryItem ? trip.activities[activityIndex] : null;
+    if (isItineraryMode) {
+      // ============================================================
+      // 1. MODO PLANIFICAR (ITINERARIO)
+      // Mostrar ÚNICAMENTE los establecimientos asignados al día seleccionado
+      // (o a todas las jornadas si es "Todos los días").
+      // NO mostrar establecimientos del catálogo no programados para ese día.
+      // ============================================================
+      const relevantActivities = trip.activities
+        .filter((a) => (isSingleDayMode ? a.dayNumber === selectedDayNumber : true))
+        .sort((a, b) => {
+          if (a.dayNumber !== b.dayNumber) return a.dayNumber - b.dayNumber;
+          return a.order - b.order;
+        });
 
-      const matchesActiveDay = selectedDayNumber
-        ? activity?.dayNumber === selectedDayNumber
-        : true;
+      relevantActivities.forEach((act) => {
+        const place = act.place || places.find((p) => p.id === act.placeId);
+        if (!place) return;
 
-      const categoryStyle = CATEGORY_STYLES[place.category] || {
-        bg: '#17243A',
-        icon: '📍',
-        label: 'Lugar',
-      };
+        renderedPlaceIds.add(place.id);
+        const isSelected = selectedPlace?.id === place.id;
+        const dayColor = getDayColor(act.dayNumber);
 
-      const el = document.createElement('div');
-      el.className = 'libertadgo-map-marker-hitbox';
-      el.style.width = '44px';
-      el.style.height = '44px';
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-      el.style.cursor = 'pointer';
-      el.style.userSelect = 'none';
-      el.style.pointerEvents = 'auto';
-      el.style.zIndex = isSelected ? '50' : '20';
-      el.setAttribute('role', 'button');
-      el.setAttribute('tabindex', '0');
-      el.setAttribute('aria-label', `${place.name} · ${place.category}`);
+        const el = document.createElement('div');
+        el.className = 'libertadgo-map-marker-hitbox';
+        el.style.width = '44px';
+        el.style.height = '44px';
+        el.style.display = 'flex';
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
+        el.style.cursor = 'pointer';
+        el.style.userSelect = 'none';
+        el.style.pointerEvents = 'auto';
+        el.style.zIndex = isSelected ? '60' : '30';
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        el.setAttribute('aria-label', `${place.name} · Día ${act.dayNumber} · #${act.order}`);
 
-      const inner = document.createElement('div');
-      inner.className = 'libertadgo-map-marker-badge';
-      inner.style.transition = 'transform 160ms cubic-bezier(0.16, 1, 0.3, 1), filter 160ms ease';
-      inner.style.display = 'flex';
-      inner.style.alignItems = 'center';
-      inner.style.justifyContent = 'center';
-      inner.style.pointerEvents = 'none';
+        const inner = document.createElement('div');
+        inner.className = 'libertadgo-map-marker-badge';
+        inner.style.transition = 'transform 160ms cubic-bezier(0.16, 1, 0.3, 1), filter 160ms ease';
+        inner.style.display = 'flex';
+        inner.style.alignItems = 'center';
+        inner.style.justifyContent = 'center';
+        inner.style.pointerEvents = 'none';
 
-      if (isItineraryItem && activity) {
-        // TIPO 1: ACTIVIDAD DE ITINERARIO (Coral #E85B49 con número de orden)
-        const dayOrderNumber = activity.order;
-        const opacity = !matchesActiveDay && selectedDayNumber ? '0.45' : '1.0';
-        const bg = isSelected ? '#17243A' : '#E85B49';
+        const bg = isSelected ? '#17243A' : dayColor.bg;
+        const badgeText = isSingleDayMode ? `${act.order}` : `D${act.dayNumber}·${act.order}`;
 
         inner.innerHTML = `
           <div style="
             background: ${bg};
             color: #FFFFFF;
-            width: 32px;
+            min-width: ${isSingleDayMode ? '32px' : '40px'};
             height: 32px;
-            border-radius: 50%;
+            padding: 0 6px;
+            border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: 800;
-            font-size: 13px;
+            font-size: ${isSingleDayMode ? '13px' : '11px'};
             font-family: system-ui, -apple-system, sans-serif;
             border: 2.5px solid #FFFFFF;
             box-shadow: ${
               isSelected
-                ? '0 0 0 4px rgba(232, 91, 73, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3)'
-                : '0 4px 10px rgba(232, 91, 73, 0.45)'
+                ? `0 0 0 4px rgba(232, 91, 73, 0.45), 0 6px 14px rgba(0, 0, 0, 0.35)`
+                : `0 4px 10px rgba(0, 0, 0, 0.25)`
             };
             position: relative;
-            opacity: ${opacity};
             transform: ${isSelected ? 'scale(1.15)' : 'none'};
-          " title="${place.name} · Día ${activity.dayNumber} (#${dayOrderNumber})">
-            ${dayOrderNumber}
+          " title="${place.name} · Día ${act.dayNumber} (Visita #${act.order})">
+            ${badgeText}
             <span style="
               position: absolute;
               bottom: -4px;
+              left: 50%;
+              margin-left: -4px;
               width: 8px;
               height: 8px;
               background: ${bg};
@@ -530,90 +688,198 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             "></span>
           </div>
         `;
-      } else if (isSaved) {
-        // TIPO 2: LUGAR GUARDADO (Azul marino con borde ámbar e icono 🔖)
-        inner.innerHTML = `
-          <div style="
-            background: #17243A;
-            color: #FBBF24;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 13px;
-            border: 2.5px solid #D97706;
-            box-shadow: ${
-              isSelected
-                ? '0 0 0 4px rgba(217, 119, 6, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3)'
-                : '0 3px 8px rgba(0, 0, 0, 0.25)'
-            };
-            position: relative;
-            transform: ${isSelected ? 'scale(1.15)' : 'none'};
-          " title="${place.name} (En tu lista para visitar)">
-            🔖
-          </div>
-        `;
-      } else {
-        // TIPO 3: CATÁLOGO GENERAL (Blanco con icono de categoría)
-        inner.innerHTML = `
-          <div style="
-            background: ${isSelected ? '#17243A' : '#FFFFFF'};
-            color: ${isSelected ? '#FFFFFF' : '#17243A'};
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            border: 2px solid ${categoryStyle.bg};
-            box-shadow: ${
-              isSelected
-                ? '0 0 0 4px rgba(232, 91, 73, 0.35), 0 3px 8px rgba(0, 0, 0, 0.25)'
-                : '0 2px 6px rgba(0, 0, 0, 0.15)'
-            };
-            transform: ${isSelected ? 'scale(1.15)' : 'none'};
-          " title="${place.name} (${categoryStyle.label})">
-            <span>${categoryStyle.icon}</span>
-          </div>
-        `;
+
+        el.appendChild(inner);
+
+        el.addEventListener('pointerdown', (e) => e.stopPropagation());
+        el.addEventListener('mousedown', (e) => e.stopPropagation());
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          onSelectPlace(place);
+          setIsCardExpanded(false);
+        });
+
+        el.addEventListener('mouseenter', () => {
+          if (!isSelected) inner.style.transform = 'scale(1.18)';
+        });
+        el.addEventListener('mouseleave', () => {
+          if (!isSelected) inner.style.transform = 'none';
+        });
+
+        const marker = new maplibregl.Marker({
+          element: el,
+          anchor: 'bottom',
+        })
+          .setLngLat([place.coordinates.lng, place.coordinates.lat])
+          .addTo(map);
+
+        markersRef.current.push(marker);
+      });
+    } else {
+      // ============================================================
+      // 2. MODO EXPLORAR (CATÁLOGO COMPLETO)
+      // Mostrar todos los lugares del catálogo que correspondan a los filtros activos
+      // Mantener buscador y categorías, y permitir añadir al itinerario.
+      // ============================================================
+      filteredPlaces.forEach((place) => {
+        renderedPlaceIds.add(place.id);
+        const isSelected = selectedPlace?.id === place.id;
+        const isSaved = savedIds.has(place.id);
+        const categoryStyle = CATEGORY_STYLES[place.category] || {
+          bg: '#17243A',
+          icon: '📍',
+          label: 'Lugar',
+        };
+
+        // Si ya está asignado en alguna jornada del viaje, mostrar indicador de día
+        const inTrip = trip.activities.find((a) => a.placeId === place.id);
+
+        const el = document.createElement('div');
+        el.className = 'libertadgo-map-marker-hitbox';
+        el.style.width = '44px';
+        el.style.height = '44px';
+        el.style.display = 'flex';
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
+        el.style.cursor = 'pointer';
+        el.style.userSelect = 'none';
+        el.style.pointerEvents = 'auto';
+        el.style.zIndex = isSelected ? '55' : '20';
+
+        const inner = document.createElement('div');
+        inner.className = 'libertadgo-map-marker-badge';
+        inner.style.transition = 'transform 160ms cubic-bezier(0.16, 1, 0.3, 1), filter 160ms ease';
+
+        if (isSaved) {
+          inner.innerHTML = `
+            <div style="
+              background: #17243A;
+              color: #FBBF24;
+              width: 28px;
+              height: 28px;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 13px;
+              border: 2px solid #D97706;
+              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+              transform: ${isSelected ? 'scale(1.18)' : 'none'};
+              position: relative;
+            " title="${place.name} (Por visitar)">
+              🔖
+              ${inTrip ? `<span style="position: absolute; -top: 4px; -right: 6px; background: #E85B49; color: #FFF; font-size: 9px; font-weight: 800; border-radius: 8px; padding: 0 4px; border: 1.5px solid #FFF;">D${inTrip.dayNumber}</span>` : ''}
+            </div>
+          `;
+        } else {
+          inner.innerHTML = `
+            <div style="
+              background: ${isSelected ? '#17243A' : '#FFFFFF'};
+              color: ${isSelected ? '#FFFFFF' : '#17243A'};
+              width: 26px;
+              height: 26px;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 12px;
+              border: 2px solid ${categoryStyle.bg};
+              box-shadow: ${isSelected ? '0 0 0 3px rgba(232, 91, 73, 0.4), 0 3px 8px rgba(0,0,0,0.25)' : '0 2px 6px rgba(0, 0, 0, 0.15)'};
+              transform: ${isSelected ? 'scale(1.18)' : 'none'};
+              position: relative;
+            " title="${place.name} (${categoryStyle.label})">
+              <span>${categoryStyle.icon}</span>
+              ${inTrip ? `<span style="position: absolute; top: -5px; right: -7px; background: #E85B49; color: #FFF; font-size: 9px; font-weight: 800; border-radius: 8px; padding: 0 4px; border: 1.5px solid #FFF;">D${inTrip.dayNumber}</span>` : ''}
+            </div>
+          `;
+        }
+
+        el.appendChild(inner);
+
+        el.addEventListener('pointerdown', (e) => e.stopPropagation());
+        el.addEventListener('mousedown', (e) => e.stopPropagation());
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          onSelectPlace(place);
+          setIsCardExpanded(false);
+        });
+
+        el.addEventListener('mouseenter', () => {
+          if (!isSelected) inner.style.transform = 'scale(1.18)';
+        });
+        el.addEventListener('mouseleave', () => {
+          if (!isSelected) inner.style.transform = 'none';
+        });
+
+        const marker = new maplibregl.Marker({
+          element: el,
+          anchor: 'center',
+        })
+          .setLngLat([place.coordinates.lng, place.coordinates.lat])
+          .addTo(map);
+
+        markersRef.current.push(marker);
+      });
+    }
+  }, [
+    filteredPlaces,
+    selectedPlace,
+    savedIds,
+    trip.activities,
+    selectedDayNumber,
+    onSelectPlace,
+    mapLoaded,
+    searchQuery,
+    selectedCategory,
+    onlySavedFilter,
+    places,
+    isItineraryMode,
+  ]);
+
+  // Ajuste automático de encuadre en el mapa al cambiar de día
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapLoaded) return;
+
+    // Si hay un lugar seleccionado, el efecto de selectedPlace ya lo enfoca
+    if (selectedPlace) return;
+
+    if (selectedDayNumber) {
+      const dayActivities = trip.activities.filter((a) => a.dayNumber === selectedDayNumber);
+      const coords: [number, number][] = [];
+      dayActivities.forEach((act) => {
+        const place = act.place || places.find((p) => p.id === act.placeId);
+        if (place?.coordinates) {
+          coords.push([place.coordinates.lng, place.coordinates.lat]);
+        }
+      });
+
+      if (coords.length === 1) {
+        map.easeTo({
+          center: coords[0],
+          zoom: 15,
+          duration: 500,
+        });
+      } else if (coords.length > 1) {
+        const bounds = new maplibregl.LngLatBounds();
+        coords.forEach((c) => bounds.extend(c));
+        map.fitBounds(bounds, { padding: 70, maxZoom: 16, duration: 600 });
       }
-
-      el.appendChild(inner);
-
-      // Prevenir que DragPan de MapLibre intercepte el clic
-      el.addEventListener('pointerdown', (e) => e.stopPropagation());
-      el.addEventListener('mousedown', (e) => e.stopPropagation());
-
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onSelectPlace(place);
-        setIsCardExpanded(false);
-      });
-
-      el.addEventListener('mouseenter', () => {
-        if (!isSelected) {
-          inner.style.transform = 'scale(1.18)';
+    } else if (selectedDayNumber === null && trip.activities.length > 0) {
+      const coords: [number, number][] = [];
+      trip.activities.forEach((act) => {
+        const place = act.place || places.find((p) => p.id === act.placeId);
+        if (place?.coordinates) {
+          coords.push([place.coordinates.lng, place.coordinates.lat]);
         }
       });
-      el.addEventListener('mouseleave', () => {
-        if (!isSelected) {
-          inner.style.transform = 'none';
-        }
-      });
-
-      const marker = new maplibregl.Marker({
-        element: el,
-        anchor: isItineraryItem ? 'bottom' : 'center',
-      })
-        .setLngLat([place.coordinates.lng, place.coordinates.lat])
-        .addTo(map);
-
-      markersRef.current.push(marker);
-    });
-  }, [filteredPlaces, selectedPlace, savedIds, trip.activities, selectedDayNumber, onSelectPlace, mapLoaded]);
+      if (coords.length > 1) {
+        const bounds = new maplibregl.LngLatBounds();
+        coords.forEach((c) => bounds.extend(c));
+        map.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 600 });
+      }
+    }
+  }, [selectedDayNumber, trip.activities, places, mapLoaded, selectedPlace]);
 
   // Si hay un lugar seleccionado, asegurar que el mapa lo enfoque suavemente
   useEffect(() => {
@@ -972,6 +1238,56 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <div className="px-3 py-1.5 bg-[#17243A] text-white text-xs font-medium rounded-full shadow-md flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-[#E85B49]" />
               <span>{userLocationMessage}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Indicador de recorrido del día (OSRM) */}
+        {!userLocationMessage && routeStatus.isLoading && (
+          <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-in fade-in duration-150">
+            <div className="px-3.5 py-1.5 bg-[#17243A]/90 backdrop-blur-xs text-white text-xs font-medium rounded-full shadow-lg flex items-center gap-2 border border-slate-700">
+              <RefreshCw className="w-3.5 h-3.5 text-[#E85B49] animate-spin" />
+              <span>Calculando recorrido vial (Día {selectedDayNumber || ''})...</span>
+            </div>
+          </div>
+        )}
+
+        {!userLocationMessage && !routeStatus.isLoading && routeStatus.data && selectedDayNumber && (
+          <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-in fade-in duration-150 max-w-[92%] sm:max-w-md">
+            <div className="px-3.5 py-1.5 bg-[#17243A] text-white text-xs font-medium rounded-full shadow-lg flex items-center gap-2 border border-slate-700">
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: getDayColor(selectedDayNumber).bg }}
+              />
+              <span className="font-bold shrink-0">Día {selectedDayNumber}:</span>
+              <span className="font-semibold text-emerald-400 shrink-0">
+                {routeStatus.data.distanceFormatted}
+              </span>
+              <span className="text-slate-400">·</span>
+              <span className="shrink-0">~{routeStatus.data.durationFormatted} en ruta</span>
+              <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-slate-300 font-mono hidden sm:inline">
+                OSRM
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowRoutes(!showRoutes)}
+                className="ml-1 text-[11px] text-slate-300 hover:text-white underline cursor-pointer shrink-0"
+                title={showRoutes ? 'Ocultar trazo en mapa' : 'Mostrar trazo en mapa'}
+              >
+                {showRoutes ? 'Ocultar' : 'Ver'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!userLocationMessage && !routeStatus.isLoading && routeStatus.isUnavailable && selectedDayNumber && (
+          <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-in fade-in duration-150 max-w-[92%] sm:max-w-md">
+            <div className="px-3.5 py-1.5 bg-amber-950/90 backdrop-blur-xs text-amber-100 text-xs font-medium rounded-full shadow-lg flex items-center gap-2 border border-amber-600/40">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="truncate">Recorrido vial aún no disponible para este tramo</span>
+              <span className="text-[10px] text-amber-300 bg-amber-900/60 px-1.5 py-0.5 rounded shrink-0">
+                Orden #1..#{routeStatus.totalPoints}
+              </span>
             </div>
           </div>
         )}
@@ -1341,15 +1657,24 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       </div>
 
       {/* ============================================================ */}
-      {/* MODAL / BOTTOM SHEET DE FILTROS AVANZADOS                    */}
+      {/* MODAL / BOTTOM SHEET DE FILTROS AVANZADOS (HEADER Y FOOTER FIJOS) */}
       {/* ============================================================ */}
       {isAdvancedFiltersOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40 backdrop-blur-2xs animate-in fade-in duration-150">
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40 backdrop-blur-2xs animate-in fade-in duration-150"
+          onClick={() => setIsAdvancedFiltersOpen(false)}
+        >
           <div
-            className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl border border-[#E2E8F0] shadow-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom-4 duration-200"
+            className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl border border-[#E2E8F0] shadow-2xl flex flex-col max-h-[90dvh] sm:max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
             onClick={(e) => e.stopPropagation()}
+            onWheel={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-3 border-b border-[#E9EEF4]">
+            {/* Tirador táctil móvil */}
+            <div className="w-12 h-1 bg-slate-300 rounded-full mx-auto my-2 shrink-0 sm:hidden" />
+
+            {/* Encabezado Fijo */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#E9EEF4] shrink-0 bg-white">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal className="w-4 h-4 text-[#E85B49]" />
                 <h3 className="text-sm font-bold font-display text-[#17243A]">
@@ -1359,98 +1684,106 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAdvancedFiltersOpen(false)}
-                className="p-1 text-[#64748B] hover:text-[#17243A] rounded-md cursor-pointer"
+                className="p-1.5 text-[#64748B] hover:text-[#17243A] hover:bg-[#F1F5F9] rounded-lg cursor-pointer transition-colors"
+                title="Cerrar filtros"
+                aria-label="Cerrar filtros"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Categorías */}
-            <div className="space-y-1.5">
-              <span className="text-xs font-bold text-[#17243A] block">Categoría:</span>
-              <div className="flex flex-wrap gap-1.5">
-                {FILTER_CATEGORIES.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => onCategoryChange?.(c.id)}
-                    className={`px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer ${
-                      selectedCategory === c.id
-                        ? 'bg-[#17243A] text-white font-semibold'
-                        : 'bg-[#F8FAFC] text-[#475569] border border-[#E2E8F0]'
-                    }`}
-                  >
-                    {c.icon} {c.label}
-                  </button>
-                ))}
+            {/* Contenido Central con Scroll Táctil Independiente */}
+            <div
+              className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4 touch-pan-y"
+              style={{ WebkitOverflowScrolling: 'touch' }}
+            >
+              {/* Categorías */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-bold text-[#17243A] block">Categoría:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {FILTER_CATEGORIES.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => onCategoryChange?.(c.id)}
+                      className={`px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer ${
+                        selectedCategory === c.id
+                          ? 'bg-[#17243A] text-white font-semibold'
+                          : 'bg-[#F8FAFC] text-[#475569] border border-[#E2E8F0]'
+                      }`}
+                    >
+                      {c.icon} {c.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* Solo Guardados */}
-            <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
-              <div>
+              {/* Solo Guardados */}
+              <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-[#17243A] block">
+                    Solo lugares guardados
+                  </span>
+                  <span className="text-[11px] text-[#64748B]">
+                    Muestra únicamente lugares en tu lista Por visitar
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={onlySavedFilter}
+                  onChange={(e) => setOnlySavedFilter(e.target.checked)}
+                  className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
+                />
+              </div>
+
+              {/* Calificación mínima */}
+              <div className="pt-2 border-t border-[#F1F5F9] space-y-1.5">
                 <span className="text-xs font-bold text-[#17243A] block">
-                  Solo lugares guardados
+                  Calificación mínima:
                 </span>
-                <span className="text-[11px] text-[#64748B]">
-                  Muestra únicamente lugares en tu lista Por visitar
-                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { val: 0, label: 'Todas' },
+                    { val: 4.0, label: '★ 4.0 o más' },
+                    { val: 4.5, label: '★ 4.5 o más' },
+                  ].map((item) => (
+                    <button
+                      key={item.val}
+                      type="button"
+                      onClick={() => setMinRatingFilter(item.val)}
+                      className={`py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                        minRatingFilter === item.val
+                          ? 'bg-[#17243A] text-white border-[#17243A]'
+                          : 'bg-[#F8FAFC] text-[#64748B] border-[#E2E8F0] hover:bg-[#F1F5F9]'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <input
-                type="checkbox"
-                checked={onlySavedFilter}
-                onChange={(e) => setOnlySavedFilter(e.target.checked)}
-                className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
-              />
+
+              {/* Certificación MINCETUR */}
+              <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-[#17243A] block">
+                    Solo certificados oficiales
+                  </span>
+                  <span className="text-[11px] text-[#64748B]">
+                    Filtra por inventario oficial MINCETUR
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={onlyMinceturFilter}
+                  onChange={(e) => setOnlyMinceturFilter(e.target.checked)}
+                  className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
+                />
+              </div>
             </div>
 
-            {/* Calificación mínima */}
-            <div className="pt-2 border-t border-[#F1F5F9] space-y-1.5">
-              <span className="text-xs font-bold text-[#17243A] block">
-                Calificación mínima:
-              </span>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { val: 0, label: 'Todas' },
-                  { val: 4.0, label: '★ 4.0 o más' },
-                  { val: 4.5, label: '★ 4.5 o más' },
-                ].map((item) => (
-                  <button
-                    key={item.val}
-                    type="button"
-                    onClick={() => setMinRatingFilter(item.val)}
-                    className={`py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
-                      minRatingFilter === item.val
-                        ? 'bg-[#17243A] text-white border-[#17243A]'
-                        : 'bg-[#F8FAFC] text-[#64748B] border-[#E2E8F0] hover:bg-[#F1F5F9]'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Certificación MINCETUR */}
-            <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-[#17243A] block">
-                  Solo certificados oficiales
-                </span>
-                <span className="text-[11px] text-[#64748B]">
-                  Filtra por inventario oficial MINCETUR
-                </span>
-              </div>
-              <input
-                type="checkbox"
-                checked={onlyMinceturFilter}
-                onChange={(e) => setOnlyMinceturFilter(e.target.checked)}
-                className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
-              />
-            </div>
-
-            {/* Botones de acción */}
-            <div className="pt-3 border-t border-[#E9EEF4] flex items-center justify-between gap-3">
+            {/* Pie Fijo con Botones de Acción */}
+            <div className="p-4 border-t border-[#E9EEF4] bg-white shrink-0 flex items-center justify-between gap-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <button
                 type="button"
                 onClick={() => {
@@ -1460,7 +1793,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                   setMinRatingFilter(0);
                   setOnlyMinceturFilter(false);
                 }}
-                className="px-3 py-2 text-xs font-semibold text-[#64748B] hover:text-[#17243A] cursor-pointer"
+                className="px-3.5 py-2.5 text-xs font-semibold text-[#64748B] hover:text-[#17243A] hover:bg-[#F8FAFC] rounded-xl transition-colors cursor-pointer"
               >
                 Limpiar filtros
               </button>
@@ -1468,7 +1801,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAdvancedFiltersOpen(false)}
-                className="px-5 py-2 text-xs font-semibold text-white bg-[#E85B49] hover:bg-[#D94C3A] rounded-xl transition-all cursor-pointer shadow-xs"
+                className="px-5 py-2.5 text-xs font-semibold text-white bg-[#E85B49] hover:bg-[#D94C3A] rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
               >
                 Aplicar filtros ({filteredPlaces.length})
               </button>

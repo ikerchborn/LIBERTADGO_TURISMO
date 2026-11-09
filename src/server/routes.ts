@@ -118,6 +118,98 @@ apiRouter.get('/places/:id', (req: Request, res: Response) => {
   res.json({ success: true, data: place });
 });
 
+// GET /api/route - Real-world street routing via OpenStreetMap / OSRM
+apiRouter.get('/route', async (req: Request, res: Response) => {
+  const coordinates = typeof req.query.coordinates === 'string' ? req.query.coordinates.trim() : '';
+  if (!coordinates || !coordinates.includes(';')) {
+    res.status(400).json({
+      success: false,
+      error: 'Se requieren al menos 2 coordenadas separadas por punto y coma (ej. lng1,lat1;lng2,lat2)',
+    });
+    return;
+  }
+
+  // Validate format
+  const pairs = coordinates.split(';');
+  const isValidFormat = pairs.every((p) => {
+    const [lng, lat] = p.split(',').map(Number);
+    return !isNaN(lng) && !isNaN(lat) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  });
+
+  if (!isValidFormat) {
+    res.status(400).json({
+      success: false,
+      error: 'Formato de coordenadas inválido. Debe ser longitud,latitud numérico.',
+    });
+    return;
+  }
+
+  try {
+    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    const osrmResponse = await fetch(osrmUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'LibertadGO-Turismo-LaLibertad/1.0',
+      },
+    });
+    clearTimeout(timeout);
+
+    if (!osrmResponse.ok) {
+      res.status(502).json({
+        success: false,
+        error: 'El servicio de enrutamiento OSRM no respondió correctamente.',
+      });
+      return;
+    }
+
+    const data = await osrmResponse.json();
+    if (data.code === 'Ok' && Array.isArray(data.routes) && data.routes.length > 0) {
+      const best = data.routes[0];
+      const distanceMeters = Math.round(best.distance || 0);
+      const durationSeconds = Math.round(best.duration || 0);
+
+      const distanceFormatted =
+        distanceMeters < 1000
+          ? `${distanceMeters} m`
+          : `${(distanceMeters / 1000).toFixed(1)} km`;
+
+      const minutes = Math.round(durationSeconds / 60);
+      const durationFormatted =
+        minutes < 60
+          ? `${Math.max(1, minutes)} min`
+          : `${Math.floor(minutes / 60)} h ${minutes % 60 > 0 ? `${minutes % 60} min` : ''}`.trim();
+
+      res.json({
+        success: true,
+        route: {
+          coordinates: best.geometry?.coordinates || [],
+          distanceMeters,
+          durationSeconds,
+          distanceFormatted,
+          durationFormatted,
+          provider: 'OSRM / OpenStreetMap',
+        },
+      });
+      return;
+    }
+
+    res.status(404).json({
+      success: false,
+      error: 'Recorrido vial aún no disponible para este tramo.',
+    });
+  } catch (err) {
+    console.warn('[Routing] Error querying OSRM:', err instanceof Error ? err.message : String(err));
+    res.status(503).json({
+      success: false,
+      error: 'Servicio de cálculo de rutas no disponible temporalmente.',
+    });
+  }
+});
+
 // POST /api/itineraries
 apiRouter.post('/itineraries', (req: Request, res: Response) => {
   const parseResult = CreateTripSchema.safeParse(req.body);

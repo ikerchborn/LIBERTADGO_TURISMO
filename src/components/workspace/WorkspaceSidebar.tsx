@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   Compass,
   Search,
@@ -32,22 +32,52 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   const savedCount = trip.savedPlaceIds?.length || 0;
   const totalActivities = trip.activities.length;
 
+  const sectionNavRef = useRef<HTMLDivElement>(null);
+  const sectionButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const mobileDaysNavRef = useRef<HTMLDivElement>(null);
+  const mobileDayButtonsRef = useRef<Map<number | 'all', HTMLButtonElement>>(new Map());
+
+  // Scroll suave al botón de sección activo si queda fuera de vista en móvil
+  useEffect(() => {
+    const activeBtn = sectionButtonsRef.current.get(activeSection);
+    if (activeBtn && sectionNavRef.current) {
+      activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }, [activeSection]);
+
+  // Scroll suave al día seleccionado en móvil
+  useEffect(() => {
+    const targetKey = selectedDayNumber ?? 'all';
+    const dayBtn = mobileDayButtonsRef.current.get(targetKey);
+    if (dayBtn && mobileDaysNavRef.current) {
+      dayBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }, [selectedDayNumber]);
+
   return (
     <>
       {/* 
         VISTA MÓVIL (< md):
         Barra horizontal limpia de pestañas optimizada para smartphones
       */}
-      <div className="flex md:hidden flex-col w-full bg-white border-b border-[#E9EEF4] shrink-0 select-none">
+      <div className="flex md:hidden flex-col w-full bg-white border-b border-[#E9EEF4] shrink-0">
         {/* Pestañas de sección con scroll táctil fluido sin barra nativa */}
-        <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2 no-scrollbar border-b border-[#E9EEF4]/60 scroll-smooth">
+        <div
+          ref={sectionNavRef}
+          className="flex items-center gap-1.5 overflow-x-auto flex-nowrap px-3 py-2 no-scrollbar border-b border-[#E9EEF4]/60 touch-pan-x overscroll-x-contain"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
           <button
+            ref={(el) => {
+              if (el) sectionButtonsRef.current.set('itinerary', el);
+              else sectionButtonsRef.current.delete('itinerary');
+            }}
             type="button"
             onClick={() => {
               onSelectSection('itinerary');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 flex-shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'itinerary'
                 ? 'bg-[#17243A] text-white font-semibold shadow-xs'
                 : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
@@ -69,12 +99,16 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           </button>
 
           <button
+            ref={(el) => {
+              if (el) sectionButtonsRef.current.set('explore', el);
+              else sectionButtonsRef.current.delete('explore');
+            }}
             type="button"
             onClick={() => {
               onSelectSection('explore');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 flex-shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'explore'
                 ? 'bg-[#17243A] text-white font-semibold shadow-xs'
                 : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
@@ -85,12 +119,16 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           </button>
 
           <button
+            ref={(el) => {
+              if (el) sectionButtonsRef.current.set('saved', el);
+              else sectionButtonsRef.current.delete('saved');
+            }}
             type="button"
             onClick={() => {
               onSelectSection('saved');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 flex-shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'saved'
                 ? 'bg-[#17243A] text-white font-semibold shadow-xs'
                 : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
@@ -112,12 +150,16 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           </button>
 
           <button
+            ref={(el) => {
+              if (el) sectionButtonsRef.current.set('notes', el);
+              else sectionButtonsRef.current.delete('notes');
+            }}
             type="button"
             onClick={() => {
               onSelectSection('notes');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 flex-shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'notes'
                 ? 'bg-[#17243A] text-white font-semibold shadow-xs'
                 : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
@@ -128,12 +170,16 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           </button>
 
           <button
+            ref={(el) => {
+              if (el) sectionButtonsRef.current.set('overview', el);
+              else sectionButtonsRef.current.delete('overview');
+            }}
             type="button"
             onClick={() => {
               onSelectSection('overview');
               onSelectDayNumber(null);
             }}
-            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs rounded-lg shrink-0 flex-shrink-0 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeSection === 'overview'
                 ? 'bg-[#17243A] text-white font-semibold shadow-xs'
                 : 'bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] border border-[#E2E8F0]/70 font-medium'
@@ -146,11 +192,19 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
 
         {/* Sub-selector de días si está en itinerario */}
         {activeSection === 'itinerary' && (
-          <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2 bg-[#F8FAFC] no-scrollbar border-b border-[#E9EEF4]/70 scroll-smooth">
+          <div
+            ref={mobileDaysNavRef}
+            className="flex items-center gap-1.5 overflow-x-auto flex-nowrap px-3 py-2 bg-[#F8FAFC] no-scrollbar border-b border-[#E9EEF4]/70 touch-pan-x overscroll-x-contain"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
             <button
+              ref={(el) => {
+                if (el) mobileDayButtonsRef.current.set('all', el);
+                else mobileDayButtonsRef.current.delete('all');
+              }}
               type="button"
               onClick={() => onSelectDayNumber(null)}
-              className={`px-2.5 py-1 text-xs rounded-lg font-mono shrink-0 cursor-pointer transition-colors ${
+              className={`px-2.5 py-1 text-xs rounded-lg font-mono shrink-0 flex-shrink-0 whitespace-nowrap cursor-pointer transition-colors ${
                 selectedDayNumber === null
                   ? 'bg-[#17243A] text-white font-bold shadow-xs'
                   : 'bg-white text-[#64748B] hover:text-[#17243A] border border-[#E2E8F0]'
@@ -160,10 +214,14 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
             </button>
             {dayItems.map((d) => (
               <button
+                ref={(el) => {
+                  if (el) mobileDayButtonsRef.current.set(d.dayNumber, el);
+                  else mobileDayButtonsRef.current.delete(d.dayNumber);
+                }}
                 key={d.dayNumber}
                 type="button"
                 onClick={() => onSelectDayNumber(d.dayNumber)}
-                className={`px-2.5 py-1 text-xs rounded-lg font-mono shrink-0 cursor-pointer transition-colors ${
+                className={`px-2.5 py-1 text-xs rounded-lg font-mono shrink-0 flex-shrink-0 whitespace-nowrap cursor-pointer transition-colors ${
                   selectedDayNumber === d.dayNumber
                     ? 'bg-[#17243A] text-white font-bold shadow-xs'
                     : 'bg-white text-[#64748B] hover:text-[#17243A] border border-[#E2E8F0]'
