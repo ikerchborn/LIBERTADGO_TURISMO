@@ -134,10 +134,10 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
         </div>
 
         {/* Tarjeta de creación compacta y adaptable */}
-        <div className="bg-white rounded-2xl border border-[#E9EEF4] shadow-xs p-4 sm:p-5">
+        <div className="bg-white rounded-lg border border-[#E9E7E1] shadow-xs p-4 sm:p-5">
           <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
             {errorMsg && (
-              <div className="flex items-center gap-2 p-2.5 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl">
+              <div className="flex items-center gap-2 p-2.5 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
@@ -145,7 +145,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
 
             {/* 1. Destino */}
             <div>
-              <label className="block text-[11px] font-semibold text-[#17243A] uppercase tracking-wider mb-1">
+              <label className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
                 Destino en La Libertad
               </label>
 
@@ -153,12 +153,12 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-[#F7F8FA] border border-[#E9EEF4] hover:border-slate-300 rounded-xl text-left cursor-pointer transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 bg-white border border-[#E9E7E1] hover:border-slate-300 rounded-md text-left cursor-pointer transition-colors"
                 >
                   <div className="flex items-center gap-2">
                     <MapPin className="w-3.5 h-3.5 text-[#E85B49] shrink-0" />
                     <div>
-                      <span className="text-xs font-semibold text-[#17243A]">
+                      <span className="text-xs font-semibold text-[#263B35]">
                         {selectedLocality.name}
                       </span>
                       <span className="text-[11px] text-[#64748B] ml-1.5">
@@ -170,13 +170,13 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                 </button>
 
                 {isDropdownOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 z-30 bg-white border border-[#E9EEF4] rounded-xl shadow-lg p-2 max-h-56 overflow-y-auto">
+                  <div className="absolute top-full left-0 right-0 mt-1 z-30 bg-white border border-[#E9E7E1] rounded-md shadow-lg p-2 max-h-56 overflow-y-auto">
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Buscar localidad (Trujillo, Huanchaco, Moche...)"
-                      className="w-full px-2.5 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-lg mb-1.5 focus:outline-none focus:border-[#17243A]"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md mb-1.5 focus:outline-none focus:border-[#E85B49]"
                       autoFocus
                     />
                     <div className="space-y-0.5">
@@ -189,10 +189,10 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                             setIsDropdownOpen(false);
                             setSearchQuery('');
                           }}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-xs transition-colors cursor-pointer ${
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-left text-xs transition-colors cursor-pointer ${
                             selectedDestinationId === loc.id
-                              ? 'bg-[#17243A] text-white font-medium'
-                              : 'hover:bg-[#F7F8FA] text-[#17243A]'
+                              ? 'bg-[#263B35] text-white font-medium'
+                              : 'hover:bg-slate-50 text-[#263B35]'
                           }`}
                         >
                           <span>{loc.name} · Prov. {loc.province}</span>
@@ -211,10 +211,10 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                     key={loc.id}
                     type="button"
                     onClick={() => setSelectedDestinationId(loc.id)}
-                    className={`text-[11px] px-2.5 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                    className={`text-[11px] px-2.5 py-0.5 rounded-md transition-colors cursor-pointer ${
                       selectedDestinationId === loc.id
-                        ? 'bg-[#17243A] text-white font-medium'
-                        : 'bg-[#F7F8FA] text-[#64748B] hover:text-[#17243A] border border-[#E9EEF4]'
+                        ? 'bg-[#263B35] text-white font-medium'
+                        : 'bg-white text-[#64748B] hover:text-[#263B35] border border-[#E9E7E1]'
                     }`}
                   >
                     {loc.name}
@@ -228,7 +228,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
               <div>
                 <label
                   htmlFor="start-date-input"
-                  className="block text-[11px] font-semibold text-[#17243A] uppercase tracking-wider mb-1"
+                  className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1"
                 >
                   Fecha de llegada
                 </label>
@@ -237,7 +237,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] font-mono focus:outline-none focus:border-[#17243A]"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md text-[#263B35] font-mono focus:outline-none focus:border-[#E85B49]"
                   required
                 />
               </div>
@@ -245,7 +245,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
               <div>
                 <label
                   htmlFor="end-date-input"
-                  className="block text-[11px] font-semibold text-[#17243A] uppercase tracking-wider mb-1"
+                  className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1"
                 >
                   Fecha de salida
                 </label>
@@ -255,19 +255,19 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                   value={endDate}
                   min={startDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] font-mono focus:outline-none focus:border-[#17243A]"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md text-[#263B35] font-mono focus:outline-none focus:border-[#E85B49]"
                   required
                 />
               </div>
             </div>
 
             {/* Resumen sutil reactivo de fechas */}
-            <div className="flex items-center justify-between px-3 py-1.5 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] text-xs">
-              <div className="flex items-center gap-1.5 text-[#17243A]">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-[#F7F2E8] rounded-md border border-[#E9E7E1] text-xs">
+              <div className="flex items-center gap-1.5 text-[#263B35]">
                 <Calendar className="w-3.5 h-3.5 text-[#64748B]" />
                 <span className="font-medium">{dateRangeFormatted}</span>
               </div>
-              <span className="font-semibold text-[#17243A]">
+              <span className="font-semibold text-[#263B35]">
                 {duration.isValid ? `${duration.days} días · ${duration.nights} noches` : '—'}
               </span>
             </div>
@@ -276,7 +276,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
             <div>
               <label
                 htmlFor="trip-name-input"
-                className="block text-[11px] font-semibold text-[#17243A] uppercase tracking-wider mb-1"
+                className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1"
               >
                 Nombre del viaje <span className="text-[#64748B] font-normal lowercase">(opcional)</span>
               </label>
@@ -286,7 +286,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                 value={tripName}
                 onChange={(e) => setTripName(e.target.value)}
                 placeholder={`Viaje a ${selectedLocality.name}`}
-                className="w-full px-3 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] placeholder:text-[#64748B]/60 focus:outline-none focus:border-[#17243A]"
+                className="w-full px-3 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md text-[#263B35] placeholder:text-[#64748B]/60 focus:outline-none focus:border-[#E85B49]"
               />
             </div>
 
@@ -294,7 +294,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
             <button
               type="submit"
               disabled={isSubmitting || !duration.isValid}
-              className="w-full py-2.5 px-4 bg-[#E85B49] hover:bg-[#D94C3A] active:scale-[0.99] disabled:opacity-50 text-white font-semibold text-xs sm:text-sm rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full py-2.5 px-4 bg-[#E85B49] hover:bg-[#D94C3C] active:scale-[0.99] disabled:opacity-50 text-white font-medium text-xs sm:text-sm rounded-md transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
             >
               <span>{isSubmitting ? 'Creando espacio...' : 'Comenzar a planificar'}</span>
               <ArrowRight className="w-4 h-4" />
@@ -314,7 +314,7 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                   key={st.id}
                   type="button"
                   onClick={() => onSelectSavedTrip(st)}
-                  className="px-2.5 py-1 text-xs bg-white hover:bg-[#E9EEF4]/60 border border-[#E9EEF4] rounded-lg text-[#17243A] font-medium transition-colors cursor-pointer"
+                  className="px-2.5 py-1 text-xs bg-white hover:bg-[#F7F2E8] border border-[#E9E7E1] rounded-md text-[#263B35] font-medium transition-colors cursor-pointer"
                 >
                   {st.title} ({st.destinationName})
                 </button>

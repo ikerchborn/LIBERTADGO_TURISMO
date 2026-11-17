@@ -127,25 +127,25 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150"
     >
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl border border-[#E9EEF4] overflow-hidden">
+      <div className="relative w-full max-w-md bg-white rounded-lg shadow-xl border border-[#E9E7E1] overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#E9EEF4]">
-          <h2 className="text-base font-bold font-display text-[#17243A]">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#E9E7E1]">
+          <h2 className="text-sm font-bold text-[#263B35]">
             Crear nuevo viaje
           </h2>
           <button
             onClick={onClose}
             aria-label="Cerrar ventana"
-            className="p-1 text-[#64748B] hover:text-[#17243A] rounded-lg transition-colors cursor-pointer"
+            className="p-1 text-[#64748B] hover:text-[#263B35] rounded-md transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-5 space-y-3.5">
           {errorMsg && (
-            <div className="flex items-center gap-2 p-2.5 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">
+            <div className="flex items-center gap-2 p-2.5 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               <span>{errorMsg}</span>
             </div>
@@ -153,34 +153,34 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
 
           {/* Destino */}
           <div>
-            <label className="block text-xs font-semibold text-[#17243A] uppercase tracking-wider mb-1.5">
+            <label className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
               Destino
             </label>
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 bg-[#F7F8FA] border border-[#E9EEF4] hover:border-slate-300 rounded-xl text-left cursor-pointer transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2 bg-white border border-[#E9E7E1] hover:border-slate-300 rounded-md text-left cursor-pointer transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <MapPin className="w-3.5 h-3.5 text-[#E85B49] shrink-0" />
-                  <span className="text-xs font-semibold text-[#17243A]">{selectedLocality.name}</span>
+                  <span className="text-xs font-semibold text-[#263B35]">{selectedLocality.name}</span>
                   <span className="text-[11px] text-[#64748B]">Prov. {selectedLocality.province}</span>
                 </div>
                 <span className="text-xs text-[#64748B]">Cambiar</span>
               </button>
 
               {isDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 z-20 bg-white border border-[#E9EEF4] rounded-xl shadow-lg p-2 max-h-52 overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 z-20 bg-white border border-[#E9E7E1] rounded-md shadow-lg p-2 max-h-52 overflow-y-auto">
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Buscar localidad..."
-                    className="w-full px-2.5 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-lg mb-1.5 focus:outline-none focus:border-[#17243A]"
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md mb-1.5 focus:outline-none focus:border-[#E85B49]"
                     autoFocus
                   />
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {filteredLocalities.map((loc) => (
                       <button
                         key={loc.id}
@@ -190,10 +190,10 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                           setIsDropdownOpen(false);
                           setSearchQuery('');
                         }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-xs transition-colors cursor-pointer ${
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-left text-xs transition-colors cursor-pointer ${
                           selectedDestinationId === loc.id
-                            ? 'bg-[#17243A] text-white font-medium'
-                            : 'hover:bg-[#F7F8FA] text-[#17243A]'
+                            ? 'bg-[#263B35] text-white font-medium'
+                            : 'hover:bg-slate-50 text-[#263B35]'
                         }`}
                       >
                         <span>{loc.name}</span>
@@ -207,9 +207,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           </div>
 
           {/* Fechas */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label htmlFor="modal-start-date" className="block text-xs font-semibold text-[#17243A] uppercase tracking-wider mb-1.5">
+              <label htmlFor="modal-start-date" className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
                 Llegada
               </label>
               <input
@@ -217,12 +217,12 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl font-mono text-[#17243A] focus:outline-none focus:border-[#17243A]"
+                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md font-mono text-[#263B35] focus:outline-none focus:border-[#E85B49]"
                 required
               />
             </div>
             <div>
-              <label htmlFor="modal-end-date" className="block text-xs font-semibold text-[#17243A] uppercase tracking-wider mb-1.5">
+              <label htmlFor="modal-end-date" className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
                 Salida
               </label>
               <input
@@ -231,26 +231,26 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                 value={endDate}
                 min={startDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl font-mono text-[#17243A] focus:outline-none focus:border-[#17243A]"
+                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md font-mono text-[#263B35] focus:outline-none focus:border-[#E85B49]"
                 required
               />
             </div>
           </div>
 
           {/* Resumen */}
-          <div className="flex items-center justify-between px-3 py-2 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] text-xs">
-            <div className="flex items-center gap-1.5 text-[#17243A]">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#F7F2E8] rounded-md border border-[#E9E7E1] text-xs">
+            <div className="flex items-center gap-1.5 text-[#263B35]">
               <Calendar className="w-3.5 h-3.5 text-[#64748B]" />
               <span>{dateRangeFormatted}</span>
             </div>
-            <span className="font-semibold text-[#17243A]">
+            <span className="font-semibold text-[#263B35]">
               {duration.isValid ? `${duration.days} días` : '—'}
             </span>
           </div>
 
           {/* Nombre opcional */}
           <div>
-            <label htmlFor="modal-trip-name" className="block text-xs font-semibold text-[#17243A] uppercase tracking-wider mb-1.5">
+            <label htmlFor="modal-trip-name" className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
               Nombre <span className="text-[#64748B] font-normal lowercase">(opcional)</span>
             </label>
             <input
@@ -259,14 +259,14 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
               placeholder={`Viaje a ${selectedLocality.name}`}
               value={tripName}
               onChange={(e) => setTripName(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] placeholder:text-[#64748B]/60 focus:outline-none focus:border-[#17243A]"
+              className="w-full px-3 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md text-[#263B35] placeholder:text-[#64748B]/60 focus:outline-none focus:border-[#E85B49]"
             />
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting || !duration.isValid}
-            className="w-full mt-2 py-2.5 px-4 bg-[#E85B49] hover:bg-[#D94C3A] active:scale-[0.99] disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            className="w-full mt-2 py-2.5 px-4 bg-[#E85B49] hover:bg-[#D94C3C] active:scale-[0.99] disabled:opacity-50 text-white font-medium text-xs rounded-md shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <span>{isSubmitting ? 'Guardando...' : 'Crear viaje'}</span>
             <ArrowRight className="w-3.5 h-3.5" />

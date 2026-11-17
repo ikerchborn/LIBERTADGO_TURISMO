@@ -400,7 +400,7 @@ export const CreatorEditorModal: React.FC<CreatorEditorModalProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Sube la foto de perfil descargada de TikTok, Instagram o YouTube para guardarla permanentemente en Wayra.
+              Sube la foto de perfil descargada de TikTok, Instagram o YouTube para guardarla permanentemente en RiyMo.
             </p>
 
             {/* Error banner */}

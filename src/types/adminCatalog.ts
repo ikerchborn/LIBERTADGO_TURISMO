@@ -132,5 +132,14 @@ export interface AdminDashboardMetrics {
     totalExternalComments: number;
   };
   recentActivity?: UnifiedAuditEntry[];
+  timeline?: Array<{
+    date: string;
+    label: string;
+    places: number;
+    creators: number;
+    videos: number;
+    audits: number;
+    total: number;
+  }>;
 }
 

@@ -153,8 +153,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   }, [selectedDayNumber, isItineraryMode]);
 
+  const destinationLocality: Locality | undefined = getLocality(trip.destinationId);
+  const centerLat = destinationLocality?.coordinates.lat || -8.1118;
+  const centerLng = destinationLocality?.coordinates.lng || -79.0287;
+  const initialZoom = destinationLocality?.defaultZoom || 14;
+
   const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [currentZoom, setCurrentZoom] = useState<number>(initialZoom);
   const [showRoutes, setShowRoutes] = useState<boolean>(true);
   const [routeStatus, setRouteStatus] = useState<{
     isLoading: boolean;
@@ -197,11 +203,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     setQuickDayPickerOpen(false);
     setIsCardExpanded(false);
   }, [selectedPlace?.id]);
-
-  const destinationLocality: Locality | undefined = getLocality(trip.destinationId);
-  const centerLat = destinationLocality?.coordinates.lat || -8.1118;
-  const centerLng = destinationLocality?.coordinates.lng || -79.0287;
-  const initialZoom = destinationLocality?.defaultZoom || 14;
 
   const savedIds = useMemo(() => new Set(trip.savedPlaceIds || []), [trip.savedPlaceIds]);
 
@@ -386,6 +387,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         } else {
           lastCenterRef.current = [center.lng, center.lat];
         }
+      });
+
+      map.on('zoomend', () => {
+        setCurrentZoom(map.getZoom());
       });
 
       map.on('load', () => {
@@ -802,10 +807,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     } else {
       // ============================================================
       // 2. MODO EXPLORAR (CATÁLOGO COMPLETO)
-      // Mostrar todos los lugares del catálogo que correspondan a los filtros activos
-      // Mantener buscador y categorías, y permitir añadir al itinerario.
+      // Agrupación visual inteligente (clustering) estilo Google Maps si hay alta densidad
       // ============================================================
-      filteredPlaces.forEach((place) => {
+      const renderSinglePlaceMarker = (place: Place) => {
         renderedPlaceIds.add(place.id);
         const isSelected = selectedPlace?.id === place.id;
         const isSaved = savedIds.has(place.id);
@@ -815,7 +819,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           label: 'Lugar',
         };
 
-        // Si ya está asignado en alguna jornada del viaje, mostrar indicador de día
         const inTrip = trip.activities.find((a) => a.placeId === place.id);
 
         const el = document.createElement('div');
@@ -903,7 +906,135 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           .addTo(map);
 
         markersRef.current.push(marker);
-      });
+      };
+
+      const shouldCluster = currentZoom < 13.5 && filteredPlaces.length > 25;
+
+      if (shouldCluster) {
+        type PlaceCluster = {
+          places: Place[];
+          centerLng: number;
+          centerLat: number;
+          hasSaved: boolean;
+        };
+
+        const clusters: PlaceCluster[] = [];
+        const clusterDistanceDeg = currentZoom < 10 ? 0.08 : currentZoom < 12 ? 0.035 : 0.016;
+
+        filteredPlaces.forEach((place) => {
+          if (selectedPlace?.id === place.id) {
+            clusters.push({
+              places: [place],
+              centerLng: place.coordinates.lng,
+              centerLat: place.coordinates.lat,
+              hasSaved: savedIds.has(place.id),
+            });
+            return;
+          }
+
+          let added = false;
+          for (const c of clusters) {
+            if (c.places.some((p) => p.id === selectedPlace?.id)) continue;
+            const dist = Math.hypot(
+              place.coordinates.lng - c.centerLng,
+              place.coordinates.lat - c.centerLat
+            );
+            if (dist < clusterDistanceDeg) {
+              c.places.push(place);
+              if (savedIds.has(place.id)) c.hasSaved = true;
+              c.centerLng =
+                (c.centerLng * (c.places.length - 1) + place.coordinates.lng) / c.places.length;
+              c.centerLat =
+                (c.centerLat * (c.places.length - 1) + place.coordinates.lat) / c.places.length;
+              added = true;
+              break;
+            }
+          }
+
+          if (!added) {
+            clusters.push({
+              places: [place],
+              centerLng: place.coordinates.lng,
+              centerLat: place.coordinates.lat,
+              hasSaved: savedIds.has(place.id),
+            });
+          }
+        });
+
+        clusters.forEach((cluster) => {
+          if (cluster.places.length > 1) {
+            const clusterEl = document.createElement('div');
+            clusterEl.className = 'riymo-map-cluster-marker';
+            clusterEl.style.width = '38px';
+            clusterEl.style.height = '38px';
+            clusterEl.style.display = 'flex';
+            clusterEl.style.alignItems = 'center';
+            clusterEl.style.justifyContent = 'center';
+            clusterEl.style.cursor = 'pointer';
+            clusterEl.style.userSelect = 'none';
+            clusterEl.style.pointerEvents = 'auto';
+            clusterEl.style.zIndex = '15';
+            clusterEl.setAttribute('role', 'button');
+            clusterEl.setAttribute('aria-label', `${cluster.places.length} lugares en esta zona`);
+
+            clusterEl.innerHTML = `
+              <div style="
+                background: ${cluster.hasSaved ? '#17243A' : '#263B35'};
+                color: #FFFFFF;
+                min-width: 32px;
+                height: 32px;
+                padding: 0 6px;
+                border-radius: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                font-weight: 700;
+                font-family: Roboto, system-ui, sans-serif;
+                border: 2px solid ${cluster.hasSaved ? '#D9B66F' : '#FFFFFF'};
+                box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+                transition: transform 160ms ease;
+              " title="${cluster.places.length} lugares (Clic para acercar)">
+                ${cluster.places.length}
+              </div>
+            `;
+
+            clusterEl.addEventListener('mouseenter', () => {
+              const innerDiv = clusterEl.firstElementChild as HTMLElement;
+              if (innerDiv) innerDiv.style.transform = 'scale(1.15)';
+            });
+            clusterEl.addEventListener('mouseleave', () => {
+              const innerDiv = clusterEl.firstElementChild as HTMLElement;
+              if (innerDiv) innerDiv.style.transform = 'none';
+            });
+            clusterEl.addEventListener('click', (e) => {
+              e.stopPropagation();
+              map.flyTo({
+                center: [cluster.centerLng, cluster.centerLat],
+                zoom: Math.min(16, (map.getZoom() || currentZoom) + 2.5),
+                duration: 500,
+              });
+            });
+
+            const marker = new maplibregl.Marker({
+              element: clusterEl,
+              anchor: 'center',
+            })
+              .setLngLat([cluster.centerLng, cluster.centerLat])
+              .addTo(map);
+
+            markersRef.current.push(marker);
+            return;
+          }
+
+          const singlePlace = cluster.places[0];
+          renderSinglePlaceMarker(singlePlace);
+        });
+      } else {
+        filteredPlaces.forEach((place) => {
+          renderSinglePlaceMarker(place);
+        });
+      }
     }
   }, [
     filteredPlaces,
@@ -918,6 +1049,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     onlySavedFilter,
     places,
     isItineraryMode,
+    currentZoom,
   ]);
 
   // Ajuste automático de encuadre en el mapa al cambiar de día

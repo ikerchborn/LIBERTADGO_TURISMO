@@ -63,7 +63,7 @@ export const PlaceVideosSection: React.FC<PlaceVideosSectionProps> = ({
 
   if (loading) {
     return (
-      <div className="py-4 px-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center gap-2 text-xs text-slate-500">
+      <div className="py-4 px-3 rounded-md bg-white border border-[#E9E7E1] flex items-center justify-center gap-2 text-xs text-[#64748B]">
         <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#E85B49]" />
         <span>Consultando videos de este lugar...</span>
       </div>
@@ -72,7 +72,7 @@ export const PlaceVideosSection: React.FC<PlaceVideosSectionProps> = ({
 
   if (error) {
     return (
-      <div className="py-3 px-3 rounded-xl bg-rose-50/70 border border-rose-100 flex items-center justify-between text-xs text-rose-700">
+      <div className="py-3 px-3 rounded-md bg-rose-50/70 border border-rose-200 flex items-center justify-between text-xs text-rose-700">
         <div className="flex items-center gap-2">
           <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
           <span>{error}</span>
@@ -90,15 +90,15 @@ export const PlaceVideosSection: React.FC<PlaceVideosSectionProps> = ({
 
   if (videos.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-gradient-to-b from-slate-50/60 to-white p-4 text-center">
-        <div className="w-9 h-9 mx-auto rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mb-2.5">
-          <Video className="w-4 h-4 text-slate-400" />
+      <div className="rounded-md border border-dashed border-[#E9E7E1] bg-white p-4 text-center">
+        <div className="w-8 h-8 mx-auto rounded-full bg-[#F7F2E8] text-[#263B35] flex items-center justify-center mb-2">
+          <Video className="w-4 h-4 text-[#64748B]" />
         </div>
-        <h4 className="text-xs font-bold text-slate-800">
-          Próximamente descubrirás videos de este lugar
+        <h4 className="text-xs font-semibold text-[#263B35]">
+          Próximamente videos de este lugar
         </h4>
-        <p className="text-[11px] text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">
-          Aún no se han publicado videos de este destino en Wayra.
+        <p className="text-[11px] text-[#64748B] mt-1 max-w-xs mx-auto leading-relaxed">
+          Aún no se han publicado videos de este destino en RiyMo.
         </p>
 
         {onShareVideo ? (

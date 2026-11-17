@@ -82,14 +82,14 @@ export const TikTokRankingPanel: React.FC = () => {
 
         {/* Filtros compactos */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[160px]">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          <div className="relative flex-1 min-w-[160px] max-w-xs">
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
 
             <select
               value={locality}
               onChange={(event) => setLocality(event.target.value)}
               disabled={loading}
-              className="w-full appearance-none rounded-full border border-slate-200 bg-white py-2 pl-9 pr-8 text-xs font-medium text-slate-700 outline-none focus:border-[#E85B49] disabled:bg-slate-50"
+              className="w-full appearance-none rounded-md border border-[#E9E7E1] bg-white py-1.5 pl-8 pr-8 text-xs font-medium text-[#263B35] outline-none focus:border-[#E85B49] disabled:bg-slate-50 cursor-pointer"
             >
               <option value="todas">Toda La Libertad</option>
 
@@ -201,7 +201,7 @@ export const TikTokRankingPanel: React.FC = () => {
             <TikTokVideoGallery
               videos={videos}
               title={`Videos destacados en ${localityDisplayName}`}
-              description="Contenido verificado con métricas reales y enlaces a creadores."
+              description="Videos de creadores y viajeros explorando La Libertad."
               showFilters={true}
               showSearch={true}
               showCount={true}
