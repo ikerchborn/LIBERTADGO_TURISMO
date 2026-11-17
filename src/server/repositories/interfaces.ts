@@ -15,6 +15,7 @@ import {
   VideoExternalMetrics,
 } from '../../types/creators.ts';
 import { Place } from '../../types/catalog.ts';
+import { CreatorAuditEntry } from '../../types/adminCatalog.ts';
 
 export interface VideoFilterOptions {
   localityId?: string;
@@ -130,6 +131,20 @@ export interface ICreatorsRepository {
     changedFields?: string[] | null;
   }): Promise<VideoModerationLog>;
   getModerationLogs(videoId: string): Promise<VideoModerationLog[]>;
+  getAllModerationLogs(limit?: number): Promise<VideoModerationLog[]>;
+
+  // Creator Audit Trail
+  addCreatorAuditLog(entry: {
+    creatorId: string;
+    creatorHandle: string;
+    adminUserId: string;
+    adminName: string;
+    action: 'CREATE' | 'UPDATE' | 'VISIBILITY_CHANGE';
+    previousData?: any | null;
+    newData?: any | null;
+    changeSummary: string;
+  }): Promise<CreatorAuditEntry>;
+  getCreatorAuditLogs(creatorId?: string, limit?: number): Promise<CreatorAuditEntry[]>;
 
   // Places Association (N:M with Place)
   associatePlaces(

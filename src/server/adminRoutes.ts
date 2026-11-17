@@ -513,6 +513,18 @@ adminRouter.post('/creators', async (req: Request, res: Response) => {
       isVerified: parseResult.data.isVerified ?? false,
     });
 
+    // Record creator audit log
+    await repo.addCreatorAuditLog({
+      creatorId: profile.id,
+      creatorHandle: profile.handle,
+      adminUserId: req.user.userId,
+      adminName: req.user.name,
+      action: 'CREATE',
+      previousData: null,
+      newData: profile,
+      changeSummary: `Creado perfil de creador @${profile.handle} (${profile.displayName}) con plataforma ${profile.primaryPlatform}.`,
+    });
+
     res.status(201).json({
       success: true,
       data: profile,
@@ -585,6 +597,23 @@ adminRouter.put('/creators/:id', async (req: Request, res: Response) => {
       });
       return;
     }
+
+    const isVisibilityOnly = Object.keys(parseResult.data).length === 1 && parseResult.data.isPublic !== undefined;
+    const action = isVisibilityOnly ? 'VISIBILITY_CHANGE' : 'UPDATE';
+    const summary = isVisibilityOnly
+      ? `Cambiado estado de visibilidad a ${parseResult.data.isPublic ? 'PÚBLICO' : 'OCULTO'} para @${updatedProfile.handle}.`
+      : `Actualizado perfil de creador @${updatedProfile.handle} (${Object.keys(parseResult.data).join(', ')}).`;
+
+    await repo.addCreatorAuditLog({
+      creatorId: updatedProfile.id,
+      creatorHandle: updatedProfile.handle,
+      adminUserId: req.user.userId,
+      adminName: req.user.name,
+      action,
+      previousData: existing,
+      newData: updatedProfile,
+      changeSummary: summary,
+    });
 
     res.json({
       success: true,
@@ -720,7 +749,7 @@ import {
   VerifyPlaceSchema,
   MergeDuplicatesSchema,
 } from './placesSchemas.ts';
-import { PlaceStatus } from '../types/adminCatalog.ts';
+import { PlaceStatus, UnifiedAuditEntry, AuditModule } from '../types/adminCatalog.ts';
 
 // 6. GET /api/admin/dashboard - Comprehensive system indicators
 adminRouter.get('/dashboard', async (_req: Request, res: Response) => {
@@ -1048,22 +1077,206 @@ adminRouter.post('/duplicates/merge', async (req: Request, res: Response) => {
   }
 });
 
-// 18. GET /api/admin/audit - Immutable audit trail
+// 18. GET /api/admin/audit - Unified immutable audit trail across Places, Creators, and Videos
 adminRouter.get('/audit', async (req: Request, res: Response) => {
   try {
-    const repo = getPlaceRepository();
-    const placeId = typeof req.query.placeId === 'string' ? req.query.placeId : undefined;
-    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const placeRepo = getPlaceRepository();
+    const creatorsRepo = getCreatorsRepository();
 
-    const logs = await repo.getAuditLogs(placeId, limit);
+    const moduleFilter = typeof req.query.module === 'string' ? req.query.module.toLowerCase() : 'all';
+    const actionFilter = typeof req.query.action === 'string' ? req.query.action.toUpperCase() : 'ALL';
+    const searchFilter = typeof req.query.search === 'string' ? req.query.search.toLowerCase().trim() : '';
+    const startDateFilter = typeof req.query.startDate === 'string' && req.query.startDate.trim() ? req.query.startDate.trim() : null;
+    const endDateFilter = typeof req.query.endDate === 'string' && req.query.endDate.trim() ? req.query.endDate.trim() : null;
+    const legacyPlaceId = typeof req.query.placeId === 'string' ? req.query.placeId : undefined;
+
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+
+    // Parallel fetch from all modules
+    const [placeLogs, creatorLogs, videoLogs] = await Promise.all([
+      placeRepo.getAuditLogs(legacyPlaceId || 'all', 500).catch((err) => {
+        console.error('[Admin Audit] Error fetching place audit logs:', err);
+        return [];
+      }),
+      creatorsRepo.getCreatorAuditLogs('all', 500).catch((err) => {
+        console.error('[Admin Audit] Error fetching creator audit logs:', err);
+        return [];
+      }),
+      creatorsRepo.getAllModerationLogs(500).catch((err) => {
+        console.error('[Admin Audit] Error fetching video moderation logs:', err);
+        return [];
+      }),
+    ]);
+
+    // Map Places entries
+    const placeEntries: UnifiedAuditEntry[] = placeLogs.map((log) => ({
+      id: log.id,
+      module: 'places' as AuditModule,
+      entityId: log.placeId,
+      entityName: log.newData?.name || log.previousData?.name || `Lugar #${log.placeId}`,
+      action: log.action,
+      adminUserId: log.adminUserId,
+      adminName: log.adminName || 'Administrador',
+      previousStatus: log.previousData?.status || null,
+      newStatus: log.newData?.status || null,
+      changeSummary: log.changeSummary,
+      details: {
+        previousData: log.previousData,
+        newData: log.newData,
+      },
+      createdAt: log.createdAt,
+    }));
+
+    // Map Creators entries
+    const creatorEntries: UnifiedAuditEntry[] = creatorLogs.map((log) => ({
+      id: log.id,
+      module: 'creators' as AuditModule,
+      entityId: log.creatorId,
+      entityName: log.creatorHandle ? `@${log.creatorHandle.replace('@', '')}` : `Creador #${log.creatorId.slice(0, 8)}`,
+      action: log.action,
+      adminUserId: log.adminUserId,
+      adminName: log.adminName || 'Administrador',
+      previousStatus:
+        log.previousData?.isPublic !== undefined
+          ? log.previousData.isPublic
+            ? 'Público'
+            : 'Oculto'
+          : null,
+      newStatus:
+        log.newData?.isPublic !== undefined
+          ? log.newData.isPublic
+            ? 'Público'
+            : 'Oculto'
+          : null,
+      changeSummary: log.changeSummary,
+      details: {
+        previousData: log.previousData,
+        newData: log.newData,
+      },
+      createdAt: log.createdAt,
+    }));
+
+    // Map Videos entries
+    const videoEntries: UnifiedAuditEntry[] = videoLogs.map((log) => {
+      const action =
+        log.action ||
+        (log.newStatus === 'APPROVED'
+          ? 'APPROVE'
+          : log.newStatus === 'REJECTED'
+          ? 'REJECT'
+          : log.newStatus === 'OBSERVED'
+          ? 'OBSERVE'
+          : 'UPDATE');
+
+      let summary = `Moderación: ${action} (${log.newStatus})`;
+      if (log.reason) summary += ` - Motivo: ${log.reason}`;
+      if (log.internalNotes && !log.internalNotes.startsWith('__METADATA_START__')) {
+        summary += ` - ${log.internalNotes}`;
+      }
+
+      return {
+        id: log.id,
+        module: 'videos' as AuditModule,
+        entityId: log.videoId,
+        entityName: `Video #${log.videoId.slice(0, 8)}`,
+        action,
+        adminUserId: log.adminUserId,
+        adminName: log.adminName || 'Administrador',
+        previousStatus: log.previousStatus || null,
+        newStatus: log.newStatus || null,
+        changeSummary: summary,
+        details: {
+          reason: log.reason,
+          internalNotes: log.internalNotes,
+          changedFields: log.changedFields,
+          previousStatus: log.previousStatus,
+          newStatus: log.newStatus,
+        },
+        createdAt: log.createdAt,
+      };
+    });
+
+    // Module counts before filtering
+    const counts = {
+      all: placeEntries.length + creatorEntries.length + videoEntries.length,
+      places: placeEntries.length,
+      creators: creatorEntries.length,
+      videos: videoEntries.length,
+    };
+
+    // Filter by module
+    let allEntries: UnifiedAuditEntry[] = [];
+    if (moduleFilter === 'places') {
+      allEntries = placeEntries;
+    } else if (moduleFilter === 'creators') {
+      allEntries = creatorEntries;
+    } else if (moduleFilter === 'videos') {
+      allEntries = videoEntries;
+    } else {
+      allEntries = [...placeEntries, ...creatorEntries, ...videoEntries];
+    }
+
+    // Filter by legacy placeId if passed and module was all
+    if (legacyPlaceId) {
+      allEntries = allEntries.filter((e) => e.module === 'places' && e.entityId === legacyPlaceId);
+    }
+
+    // Filter by action
+    if (actionFilter && actionFilter !== 'ALL') {
+      allEntries = allEntries.filter(
+        (e) => e.action.toUpperCase() === actionFilter || (e.newStatus && e.newStatus.toUpperCase() === actionFilter)
+      );
+    }
+
+    // Filter by search text
+    if (searchFilter) {
+      allEntries = allEntries.filter((e) => {
+        const matchesEntity = e.entityName.toLowerCase().includes(searchFilter) || e.entityId.toLowerCase().includes(searchFilter);
+        const matchesSummary = e.changeSummary.toLowerCase().includes(searchFilter);
+        const matchesAdmin = e.adminName.toLowerCase().includes(searchFilter);
+        const matchesAction = e.action.toLowerCase().includes(searchFilter);
+        return matchesEntity || matchesSummary || matchesAdmin || matchesAction;
+      });
+    }
+
+    // Filter by date range
+    if (startDateFilter) {
+      const startTime = new Date(startDateFilter).getTime();
+      if (!isNaN(startTime)) {
+        allEntries = allEntries.filter((e) => new Date(e.createdAt).getTime() >= startTime);
+      }
+    }
+    if (endDateFilter) {
+      let endTime = new Date(endDateFilter).getTime();
+      if (endDateFilter.length === 10 && !endDateFilter.includes('T')) {
+        endTime = new Date(`${endDateFilter}T23:59:59.999Z`).getTime();
+      }
+      if (!isNaN(endTime)) {
+        allEntries = allEntries.filter((e) => new Date(e.createdAt).getTime() <= endTime);
+      }
+    }
+
+    // Sort by created_at DESC (newest first)
+    allEntries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Paginate
+    const total = allEntries.length;
+    const startIndex = (page - 1) * limit;
+    const paginated = allEntries.slice(startIndex, startIndex + limit);
+
     res.json({
       success: true,
-      data: logs,
-      total: logs.length,
+      data: paginated,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+      counts,
     });
   } catch (err) {
-    console.error('[Admin Error] Error fetching audit trail:', err);
-    res.status(500).json({ success: false, error: 'Error al consultar registro de auditoría' });
+    console.error('[Admin Error] Error fetching unified audit trail:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar registro de auditoría unificado' });
   }
 });
 

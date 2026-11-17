@@ -22,6 +22,36 @@ export interface PlaceAuditEntry {
   createdAt: string;
 }
 
+export type AuditModule = 'places' | 'creators' | 'videos';
+
+export interface CreatorAuditEntry {
+  id: string;
+  creatorId: string;
+  creatorHandle: string;
+  adminUserId: string;
+  adminName: string;
+  action: 'CREATE' | 'UPDATE' | 'VISIBILITY_CHANGE';
+  previousData?: any | null;
+  newData?: any | null;
+  changeSummary: string;
+  createdAt: string;
+}
+
+export interface UnifiedAuditEntry {
+  id: string;
+  module: AuditModule;
+  entityId: string;
+  entityName: string;
+  action: string;
+  adminUserId: string;
+  adminName: string;
+  previousStatus?: string | null;
+  newStatus?: string | null;
+  changeSummary: string;
+  details?: Record<string, any> | null;
+  createdAt: string;
+}
+
 export interface PlaceAdminFilters {
   search?: string;
   status?: PlaceStatus | 'ALL';

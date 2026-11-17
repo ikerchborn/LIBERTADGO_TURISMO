@@ -23,6 +23,7 @@ import {
   VideoExternalMetrics,
 } from '../../types/creators.ts';
 import { Place } from '../../types/catalog.ts';
+import { CreatorAuditEntry } from '../../types/adminCatalog.ts';
 import { INITIAL_PLACES } from '../../data/initialPlaces.ts';
 
 const AUDIT_META_PREFIX = '__AUDIT_META__:';
@@ -117,6 +118,7 @@ export function mapVideoSubmissionRow(row: any): VideoSubmission {
 
 export class PostgresCreatorsRepository implements IAuthRepository, ICreatorsRepository {
   private pool: Pool;
+  private creatorAuditBuffer: CreatorAuditEntry[] = [];
 
   constructor(connectionString: string) {
     this.pool = new Pool({
@@ -825,6 +827,106 @@ export class PostgresCreatorsRepository implements IAuthRepository, ICreatorsRep
       [videoId]
     );
     return res.rows.map(parseModerationLogRow);
+  }
+
+  async getAllModerationLogs(limit: number = 100): Promise<VideoModerationLog[]> {
+    const res = await this.pool.query(
+      `SELECT id, video_id as "videoId", admin_user_id as "adminUserId", admin_name as "adminName",
+              previous_status as "previousStatus", new_status as "newStatus", reason, internal_notes as "internalNotes",
+              created_at as "createdAt"
+       FROM video_moderation_logs
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    return res.rows.map(parseModerationLogRow);
+  }
+
+  async addCreatorAuditLog(entry: {
+    creatorId: string;
+    creatorHandle: string;
+    adminUserId: string;
+    adminName: string;
+    action: 'CREATE' | 'UPDATE' | 'VISIBILITY_CHANGE';
+    previousData?: any | null;
+    newData?: any | null;
+    changeSummary: string;
+  }): Promise<CreatorAuditEntry> {
+    const id = `caudit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const record: CreatorAuditEntry = {
+      id,
+      creatorId: entry.creatorId,
+      creatorHandle: entry.creatorHandle,
+      adminUserId: entry.adminUserId,
+      adminName: entry.adminName,
+      action: entry.action,
+      previousData: entry.previousData || null,
+      newData: entry.newData || null,
+      changeSummary: entry.changeSummary,
+      createdAt: now,
+    };
+
+    try {
+      await this.pool.query(
+        `INSERT INTO creator_audit_logs (
+          id, creator_id, admin_user_id, admin_name, action,
+          previous_data, new_data, change_summary, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          id,
+          entry.creatorId,
+          entry.adminUserId,
+          entry.adminName,
+          entry.action,
+          entry.previousData ? JSON.stringify(entry.previousData) : null,
+          entry.newData ? JSON.stringify(entry.newData) : null,
+          entry.changeSummary,
+          now,
+        ]
+      );
+    } catch {
+      // In-memory fallback if creator_audit_logs table has not been migrated yet
+      this.creatorAuditBuffer.unshift(record);
+      if (this.creatorAuditBuffer.length > 500) this.creatorAuditBuffer.pop();
+    }
+
+    return record;
+  }
+
+  async getCreatorAuditLogs(creatorId?: string, limit: number = 50): Promise<CreatorAuditEntry[]> {
+    try {
+      const query =
+        creatorId && creatorId !== 'all'
+          ? `SELECT id, creator_id as "creatorId", admin_user_id as "adminUserId", admin_name as "adminName",
+                    action, previous_data as "previousData", new_data as "newData",
+                    change_summary as "changeSummary", created_at as "createdAt"
+             FROM creator_audit_logs WHERE creator_id = $1 ORDER BY created_at DESC LIMIT $2`
+          : `SELECT id, creator_id as "creatorId", admin_user_id as "adminUserId", admin_name as "adminName",
+                    action, previous_data as "previousData", new_data as "newData",
+                    change_summary as "changeSummary", created_at as "createdAt"
+             FROM creator_audit_logs ORDER BY created_at DESC LIMIT $1`;
+      const params = creatorId && creatorId !== 'all' ? [creatorId, limit] : [limit];
+      const res = await this.pool.query(query, params);
+      return res.rows.map((r) => ({
+        id: r.id,
+        creatorId: r.creatorId,
+        creatorHandle: '',
+        adminUserId: r.adminUserId,
+        adminName: r.adminName,
+        action: r.action,
+        previousData: r.previousData,
+        newData: r.newData,
+        changeSummary: r.changeSummary,
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+      }));
+    } catch {
+      let filtered = this.creatorAuditBuffer;
+      if (creatorId && creatorId !== 'all') {
+        filtered = filtered.filter((l) => l.creatorId === creatorId);
+      }
+      return filtered.slice(0, limit);
+    }
   }
 
   async associatePlaces(

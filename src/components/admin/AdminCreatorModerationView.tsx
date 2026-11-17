@@ -26,6 +26,7 @@ import { VideoEditorModal } from './VideoEditorModal.tsx';
 import { CreatorEditorModal } from './CreatorEditorModal.tsx';
 import { VideoHistoryModal } from './VideoHistoryModal.tsx';
 import { resolveCreatorLabel } from '../../utils/videoAdapter.ts';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 
 interface EnrichedVideoSubmission extends VideoSubmission {
   places?: VideoPlace[];
@@ -72,6 +73,72 @@ export const AdminCreatorModerationView: React.FC = () => {
     reason: '',
     internalNotes: '',
   });
+
+  // Creator Visibility Toggle Dialog State
+  const [visibilityDialog, setVisibilityDialog] = useState<{
+    isOpen: boolean;
+    creatorId: string;
+    creatorHandle: string;
+    targetStatus: boolean;
+  }>({
+    isOpen: false,
+    creatorId: '',
+    creatorHandle: '',
+    targetStatus: true,
+  });
+  const [isTogglingVisibility, setIsTogglingVisibility] = useState(false);
+
+  // Approve Video Dialog State
+  const [approveDialog, setApproveDialog] = useState<{
+    isOpen: boolean;
+    videoId: string;
+    videoTitle: string;
+  }>({
+    isOpen: false,
+    videoId: '',
+    videoTitle: '',
+  });
+
+  const handleToggleCreatorVisibility = async () => {
+    setIsTogglingVisibility(true);
+    try {
+      const res = await fetch(`/api/admin/creators/${visibilityDialog.creatorId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          isPublic: visibilityDialog.targetStatus,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Error al actualizar visibilidad del creador');
+      }
+
+      setCreators((prev) =>
+        prev.map((c) =>
+          c.id === visibilityDialog.creatorId
+            ? { ...c, isPublic: visibilityDialog.targetStatus }
+            : c
+        )
+      );
+
+      setVisibilityDialog({
+        isOpen: false,
+        creatorId: '',
+        creatorHandle: '',
+        targetStatus: true,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al cambiar visibilidad');
+    } finally {
+      setIsTogglingVisibility(false);
+    }
+  };
 
   const placesMap = useMemo(() => {
     return new Map(INITIAL_PLACES.map((p) => [p.id, p]));
@@ -501,7 +568,7 @@ export const AdminCreatorModerationView: React.FC = () => {
                       <div className="flex items-center gap-1.5">
                         {sub.status !== 'APPROVED' && (
                           <button
-                            onClick={() => handleModerateAction(sub.id, 'APPROVE')}
+                            onClick={() => setApproveDialog({ isOpen: true, videoId: sub.id, videoTitle: sub.title })}
                             disabled={isProcessing}
                             title="Aprobar para publicación inmediata"
                             className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer transition-colors"
@@ -681,9 +748,20 @@ export const AdminCreatorModerationView: React.FC = () => {
                         </div>
                       </div>
 
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold bg-slate-100 text-slate-700">
-                        {creator.primaryPlatform}
-                      </span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold bg-slate-100 text-slate-700">
+                          {creator.primaryPlatform}
+                        </span>
+                        {creator.isPublic ? (
+                          <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
+                            Público
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800">
+                            Oculto
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Bio */}
@@ -770,9 +848,33 @@ export const AdminCreatorModerationView: React.FC = () => {
 
                   {/* Actions Footer */}
                   <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      Registrado el {new Date(creator.createdAt).toLocaleDateString('es-PE')}
-                    </span>
+                    <button
+                      onClick={() =>
+                        setVisibilityDialog({
+                          isOpen: true,
+                          creatorId: creator.id,
+                          creatorHandle: creator.handle,
+                          targetStatus: !creator.isPublic,
+                        })
+                      }
+                      className={`px-2.5 py-1 rounded text-xs font-semibold border flex items-center gap-1 cursor-pointer transition-colors ${
+                        creator.isPublic
+                          ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {creator.isPublic ? (
+                        <>
+                          <EyeOff className="w-3 h-3" />
+                          <span>Ocultar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3 h-3" />
+                          <span>Publicar</span>
+                        </>
+                      )}
+                    </button>
 
                     <button
                       onClick={() => {
@@ -903,6 +1005,53 @@ export const AdminCreatorModerationView: React.FC = () => {
           </div>
         </div>
       )}
+      {/* ============================================================== */}
+      {/* CONFIRMATION DIALOG: CREATOR VISIBILITY TOGGLE */}
+      {/* ============================================================== */}
+      <ConfirmDialog
+        isOpen={visibilityDialog.isOpen}
+        title={
+          visibilityDialog.targetStatus
+            ? 'Publicar Creador en el Directorio'
+            : 'Ocultar Creador del Directorio'
+        }
+        message={
+          visibilityDialog.targetStatus
+            ? `¿Estás seguro de que deseas volver a publicar al creador @${visibilityDialog.creatorHandle}? Volverá a estar visible en el directorio público y sus videos aprobados se mostrarán normalmente.`
+            : `¿Estás seguro de que deseas ocultar al creador @${visibilityDialog.creatorHandle} del directorio público? El perfil dejará de mostrarse en las listas públicas, pero sus videos aprobados y relaciones existentes permanecerán intactos en la base de datos.`
+        }
+        confirmText={visibilityDialog.targetStatus ? 'Sí, Publicar' : 'Sí, Ocultar'}
+        cancelText="Cancelar"
+        variant={visibilityDialog.targetStatus ? 'primary' : 'warning'}
+        isProcessing={isTogglingVisibility}
+        onConfirm={handleToggleCreatorVisibility}
+        onClose={() =>
+          setVisibilityDialog({
+            isOpen: false,
+            creatorId: '',
+            creatorHandle: '',
+            targetStatus: true,
+          })
+        }
+      />
+
+      {/* ============================================================== */}
+      {/* CONFIRMATION DIALOG: APPROVE VIDEO */}
+      {/* ============================================================== */}
+      <ConfirmDialog
+        isOpen={approveDialog.isOpen}
+        title="Aprobar Publicación de Video"
+        message={`¿Estás seguro de que deseas aprobar el video "${approveDialog.videoTitle}"? El contenido pasará a estado APPROVED y será visible públicamente en el catálogo de La Libertad.`}
+        confirmText="Sí, Aprobar Video"
+        cancelText="Cancelar"
+        variant="primary"
+        isProcessing={processingId === approveDialog.videoId}
+        onConfirm={async () => {
+          await handleModerateAction(approveDialog.videoId, 'APPROVE');
+          setApproveDialog({ isOpen: false, videoId: '', videoTitle: '' });
+        }}
+        onClose={() => setApproveDialog({ isOpen: false, videoId: '', videoTitle: '' })}
+      />
     </div>
   );
 };

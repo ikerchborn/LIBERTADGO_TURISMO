@@ -24,6 +24,7 @@ import {
   VideoExternalMetrics,
 } from '../../types/creators.ts';
 import { Place } from '../../types/catalog.ts';
+import { CreatorAuditEntry } from '../../types/adminCatalog.ts';
 import { INITIAL_PLACES } from '../../data/initialPlaces.ts';
 
 export class MemoryCreatorsRepository implements IAuthRepository, ICreatorsRepository {
@@ -32,6 +33,7 @@ export class MemoryCreatorsRepository implements IAuthRepository, ICreatorsRepos
   private videoSubmissions: Map<string, VideoSubmission> = new Map();
   private videoPlaces: Map<string, VideoPlace> = new Map();
   private moderationLogs: VideoModerationLog[] = [];
+  private creatorAuditLogs: CreatorAuditEntry[] = [];
   private savedVideos: Map<string, SavedVideo> = new Map(); // key: `${userId}_${videoId}`
 
   // --- IAuthRepository ---
@@ -525,6 +527,45 @@ export class MemoryCreatorsRepository implements IAuthRepository, ICreatorsRepos
     return this.moderationLogs
       .filter((l) => l.videoId === videoId)
       .map((l) => ({ ...l }));
+  }
+
+  async getAllModerationLogs(limit: number = 100): Promise<VideoModerationLog[]> {
+    return this.moderationLogs.slice(0, limit).map((l) => ({ ...l }));
+  }
+
+  async addCreatorAuditLog(entry: {
+    creatorId: string;
+    creatorHandle: string;
+    adminUserId: string;
+    adminName: string;
+    action: 'CREATE' | 'UPDATE' | 'VISIBILITY_CHANGE';
+    previousData?: any | null;
+    newData?: any | null;
+    changeSummary: string;
+  }): Promise<CreatorAuditEntry> {
+    const id = `caudit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const record: CreatorAuditEntry = {
+      id,
+      creatorId: entry.creatorId,
+      creatorHandle: entry.creatorHandle,
+      adminUserId: entry.adminUserId,
+      adminName: entry.adminName,
+      action: entry.action,
+      previousData: entry.previousData || null,
+      newData: entry.newData || null,
+      changeSummary: entry.changeSummary,
+      createdAt: new Date().toISOString(),
+    };
+    this.creatorAuditLogs.unshift(record);
+    return { ...record };
+  }
+
+  async getCreatorAuditLogs(creatorId?: string, limit: number = 50): Promise<CreatorAuditEntry[]> {
+    let list = this.creatorAuditLogs;
+    if (creatorId && creatorId !== 'all') {
+      list = list.filter((l) => l.creatorId === creatorId);
+    }
+    return list.slice(0, limit).map((l) => ({ ...l }));
   }
 
   async associatePlaces(
