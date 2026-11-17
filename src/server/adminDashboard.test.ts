@@ -103,6 +103,14 @@ test('RiyMo Comprehensive Admin Dashboard API (/api/admin/dashboard)', async () 
       assert.ok(first.action, 'Activity must specify action');
       assert.ok(first.createdAt, 'Activity must have a createdAt timestamp');
     }
+
+    // F. Verify Temporal Evolution Timeline
+    assert.ok(Array.isArray(data.timeline), 'timeline must be an array');
+    assert.ok(data.timeline.length > 0, 'timeline must have chronological buckets');
+    const firstBucket = data.timeline[0];
+    assert.ok(firstBucket.date, 'timeline bucket must have a date key');
+    assert.ok(firstBucket.label, 'timeline bucket must have a label');
+    assert.ok(typeof firstBucket.total === 'number', 'timeline bucket must have total');
   } finally {
     server.close();
   }

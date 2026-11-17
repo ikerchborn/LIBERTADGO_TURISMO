@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   X,
   Video,
@@ -9,9 +9,15 @@ import {
   Star,
   Search,
   Upload,
+  Plus,
+  Filter,
+  CheckCircle2,
+  UserPlus,
+  Loader2,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.tsx';
-import { VideoSubmission, CreatorProfile, VideoContentType, ModerationStatus } from '../../types/creators.ts';
+import { VideoSubmission, CreatorProfile, VideoContentType, ModerationStatus, VideoPlatform } from '../../types/creators.ts';
 import { Place } from '../../types/catalog.ts';
 import { INITIAL_PLACES } from '../../data/initialPlaces.ts';
 import { LA_LIBERTAD_LOCALITIES } from '../../types/geo.ts';
@@ -25,6 +31,7 @@ interface VideoEditorModalProps {
   onVideoSaved: () => void;
   initialVideo?: (VideoSubmission & { places?: Place[] }) | null;
   creators: CreatorProfile[];
+  onCreatorCreated?: (newCreator: CreatorProfile) => void;
 }
 
 const CATEGORIES = [
@@ -39,15 +46,35 @@ const CATEGORIES = [
   { id: 'aventura', name: 'Aventura y Deportes' },
 ];
 
+const PLACE_FILTER_CATEGORIES = [
+  { id: 'ALL', name: 'Todas las categorías' },
+  { id: 'restaurantes', name: 'Restaurantes y Gastronomía' },
+  { id: 'arqueologia', name: 'Sitios Arqueológicos' },
+  { id: 'playas', name: 'Playas y Balnearios' },
+  { id: 'hoteles', name: 'Hospedaje y Hoteles' },
+  { id: 'museos', name: 'Museos y Salas Culturales' },
+  { id: 'atractivos', name: 'Atractivos Turísticos' },
+  { id: 'cultura', name: 'Cultura y Tradición' },
+  { id: 'naturaleza', name: 'Naturaleza y Paisajes' },
+  { id: 'gastronomia', name: 'Gastronomía Tradicional' },
+];
+
 export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
   isOpen,
   onClose,
   onVideoSaved,
   initialVideo,
   creators,
+  onCreatorCreated,
 }) => {
   const { token } = useAuth();
   const isEditing = Boolean(initialVideo);
+
+  // Local creators state allows instant inline creator addition
+  const [localCreators, setLocalCreators] = useState<CreatorProfile[]>(creators);
+  useEffect(() => {
+    setLocalCreators(creators);
+  }, [creators]);
 
   const [videoUrl, setVideoUrl] = useState('');
   const [title, setTitle] = useState('');
@@ -63,7 +90,22 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
   const [selectedPlaceIds, setSelectedPlaceIds] = useState<string[]>([]);
   const [primaryPlaceId, setPrimaryPlaceId] = useState<string>('');
   const [status, setStatus] = useState<ModerationStatus>('APPROVED');
+
+  // Place selection & filtering
   const [placeSearch, setPlaceSearch] = useState('');
+  const [placeLocalityFilter, setPlaceLocalityFilter] = useState('ALL');
+  const [placeCategoryFilter, setPlaceCategoryFilter] = useState('ALL');
+
+  // Inline creator creation modal/drawer state
+  const [showInlineCreator, setShowInlineCreator] = useState(false);
+  const [inlineHandle, setInlineHandle] = useState('');
+  const [inlineDisplayName, setInlineDisplayName] = useState('');
+  const [inlinePlatform, setInlinePlatform] = useState<VideoPlatform>('tiktok');
+  const [inlineBio, setInlineBio] = useState('');
+  const [inlineAvatarUrl, setInlineAvatarUrl] = useState('');
+  const [isCreatingCreator, setIsCreatingCreator] = useState(false);
+  const [inlineCreatorError, setInlineCreatorError] = useState<string | null>(null);
+  const [creatorSuccessToast, setCreatorSuccessToast] = useState<string | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -223,6 +265,11 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
     }
     setErrorMessage(null);
     setPlaceSearch('');
+    setPlaceLocalityFilter('ALL');
+    setPlaceCategoryFilter('ALL');
+    setShowInlineCreator(false);
+    setInlineCreatorError(null);
+    setCreatorSuccessToast(null);
 
     return () => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -286,6 +333,70 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
     }
   };
 
+  // Inline creator creation handler
+  const handleCreateCreatorInline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInlineCreatorError(null);
+
+    const cleanHandle = inlineHandle.trim().toLowerCase().replace(/^@+/, '');
+    if (!/^[a-z0-9_]{3,30}$/.test(cleanHandle)) {
+      setInlineCreatorError('El handle debe tener 3 a 30 caracteres (solo minúsculas, números y guión bajo)');
+      return;
+    }
+
+    if (inlineDisplayName.trim().length < 2) {
+      setInlineCreatorError('El nombre público debe tener al menos 2 caracteres');
+      return;
+    }
+
+    setIsCreatingCreator(true);
+    try {
+      const res = await fetch('/api/admin/creators', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          handle: cleanHandle,
+          displayName: inlineDisplayName.trim(),
+          primaryPlatform: inlinePlatform,
+          bio: inlineBio.trim() || undefined,
+          avatarUrl: inlineAvatarUrl.trim() || undefined,
+          isPublic: true,
+          isVerified: false,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Error al registrar el perfil del creador');
+      }
+
+      const created: CreatorProfile = json.data;
+      // Immediately append to local list and select
+      setLocalCreators((prev) => [created, ...prev]);
+      setCreatorProfileId(created.id);
+      setExternalCreatorHandle('');
+      setExternalCreatorDisplayName('');
+      setExternalCreatorAvatarUrl('');
+      setShowInlineCreator(false);
+      setInlineHandle('');
+      setInlineDisplayName('');
+      setInlineBio('');
+      setInlineAvatarUrl('');
+      setCreatorSuccessToast(`Creador @${created.handle} (${created.displayName}) registrado y asignado exitosamente.`);
+      setTimeout(() => setCreatorSuccessToast(null), 5000);
+
+      // Notify parent view so creators directory stays in sync
+      onCreatorCreated?.(created);
+    } catch (err) {
+      setInlineCreatorError(err instanceof Error ? err.message : 'Error inesperado al crear creador');
+    } finally {
+      setIsCreatingCreator(false);
+    }
+  };
+
   const handleTogglePlace = (placeId: string) => {
     setSelectedPlaceIds((prev) => {
       if (prev.includes(placeId)) {
@@ -305,15 +416,29 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
     });
   };
 
-  const filteredPlaces = INITIAL_PLACES.filter((p) => {
+  // Robust multi-criteria place filtering
+  const filteredPlaces = useMemo(() => {
     const q = placeSearch.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      p.name.toLowerCase().includes(q) ||
-      p.localityName.toLowerCase().includes(q) ||
-      p.category.toLowerCase().includes(q)
-    );
-  }).slice(0, 30); // show top 30 matching
+    return INITIAL_PLACES.filter((p) => {
+      const matchesSearch =
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        p.localityName.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q) ||
+        (p.tags && p.tags.some((t) => t.toLowerCase().includes(q)));
+
+      const matchesLocality =
+        placeLocalityFilter === 'ALL' ||
+        p.localityId === placeLocalityFilter ||
+        p.localityName.toLowerCase() === placeLocalityFilter.toLowerCase();
+
+      const matchesCategory =
+        placeCategoryFilter === 'ALL' ||
+        p.category.toLowerCase() === placeCategoryFilter.toLowerCase();
+
+      return matchesSearch && matchesLocality && matchesCategory;
+    });
+  }, [placeSearch, placeLocalityFilter, placeCategoryFilter]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -543,45 +668,200 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
           </div>
 
           {/* Creator Attribution */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-800">
-                Creador Asignado
-              </label>
-              <select
-                value={creatorProfileId}
-                onChange={(e) => setCreatorProfileId(e.target.value)}
-                className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
-              >
-                <option value="">— Sin creador asignado (Oficial / General) —</option>
-                {creators.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    @{c.handle} ({c.displayName}) - {c.primaryPlatform}
-                  </option>
-                ))}
-              </select>
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            {creatorSuccessToast && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{creatorSuccessToast}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-800">
+                    Creador Asignado
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowInlineCreator(!showInlineCreator);
+                      if (!showInlineCreator) {
+                        setInlineHandle(externalCreatorHandle || '');
+                        setInlineDisplayName(externalCreatorDisplayName || previewData?.authorName || '');
+                        if (urlValidation.platform === 'tiktok' || urlValidation.platform === 'instagram' || urlValidation.platform === 'youtube') {
+                          setInlinePlatform(urlValidation.platform as VideoPlatform);
+                        }
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#E85B49] hover:text-[#d64f3e] hover:underline cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{showInlineCreator ? 'Cerrar registro' : '+ Registrar nuevo creador'}</span>
+                  </button>
+                </div>
+                <select
+                  value={creatorProfileId}
+                  onChange={(e) => setCreatorProfileId(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                >
+                  <option value="">— Sin creador asignado (Oficial / General) —</option>
+                  {localCreators.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      @{c.handle} ({c.displayName}) - {c.primaryPlatform}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-800">
+                  Estado de la Publicación
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as ModerationStatus)}
+                  className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49] font-medium"
+                >
+                  <option value="APPROVED">Aprobado (Visible en el ranking público)</option>
+                  <option value="PENDING">Pendiente de Revisión</option>
+                  <option value="OBSERVED">Observado</option>
+                  <option value="HIDDEN">Oculto</option>
+                  <option value="REJECTED">Rechazado</option>
+                </select>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-800">
-                Estado de la Publicación
-              </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as ModerationStatus)}
-                className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49] font-medium"
-              >
-                <option value="APPROVED">Aprobado (Visible en el ranking público)</option>
-                <option value="PENDING">Pendiente de Revisión</option>
-                <option value="OBSERVED">Observado</option>
-                <option value="HIDDEN">Oculto</option>
-                <option value="REJECTED">Rechazado</option>
-              </select>
-            </div>
+            {/* Inline Quick Creator Registration Panel */}
+            {showInlineCreator && (
+              <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-amber-200/60">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <UserPlus className="w-4 h-4 text-[#E85B49]" />
+                    <span>Registrar Nuevo Creador al Directorio</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Se creará e inmediatamente se asignará a este video
+                  </span>
+                </div>
+
+                {inlineCreatorError && (
+                  <div className="p-2 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                    <span>{inlineCreatorError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Handle / Usuario (@) *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">@</span>
+                      <input
+                        type="text"
+                        value={inlineHandle}
+                        onChange={(e) => setInlineHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                        placeholder="viajero_libertad"
+                        className="w-full text-xs p-2 pl-6 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                        maxLength={30}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Nombre Público *
+                    </label>
+                    <input
+                      type="text"
+                      value={inlineDisplayName}
+                      onChange={(e) => setInlineDisplayName(e.target.value)}
+                      placeholder="Ej. Carlos Mendoza"
+                      className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                      maxLength={60}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Plataforma Principal *
+                    </label>
+                    <select
+                      value={inlinePlatform}
+                      onChange={(e) => setInlinePlatform(e.target.value as VideoPlatform)}
+                      className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                    >
+                      <option value="tiktok">TikTok</option>
+                      <option value="instagram">Instagram</option>
+                      <option value="youtube">YouTube</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Biografía Breve (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={inlineBio}
+                      onChange={(e) => setInlineBio(e.target.value)}
+                      placeholder="Explorador gastronómico de Trujillo y Huanchaco..."
+                      className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                      maxLength={200}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      URL del Avatar / Foto (Opcional)
+                    </label>
+                    <input
+                      type="url"
+                      value={inlineAvatarUrl}
+                      onChange={(e) => setInlineAvatarUrl(e.target.value)}
+                      placeholder="https://images.unsplash.com/..."
+                      className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowInlineCreator(false)}
+                    className="px-3 py-1.5 text-xs text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateCreatorInline}
+                    disabled={isCreatingCreator || inlineHandle.trim().length < 3 || inlineDisplayName.trim().length < 2}
+                    className="px-4 py-1.5 text-xs font-semibold text-white bg-[#E85B49] hover:bg-[#d64f3e] disabled:opacity-50 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    {isCreatingCreator ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Guardando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Crear y Vincular Creador</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* External Creator Attribution Fields (when no registered profile is selected) */}
-          {!creatorProfileId && (
+          {!creatorProfileId && !showInlineCreator && (
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-800">
@@ -627,49 +907,65 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
             </div>
           )}
 
-          {/* Place Association: Search & Multi-select */}
-          <div className="space-y-2 pt-2 border-t border-slate-200">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-slate-800">
-                Lugares Turísticos Asociados ({selectedPlaceIds.length}/10)
-              </label>
-              <span className="text-[11px] text-slate-500">
-                Busca entre los 297 lugares del catálogo oficial
+          {/* Place Association: Search, Locality/Category Filters & Multi-select */}
+          <div className="space-y-2.5 pt-2 border-t border-slate-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-800">
+                  Lugares Turísticos Asociados ({selectedPlaceIds.length}/10)
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  Selecciona uno o más destinos del catálogo. Marca la estrella (★) para definir el destino principal.
+                </p>
+              </div>
+              <span className="text-[11px] font-mono text-slate-500 shrink-0">
+                Mostrando {Math.min(filteredPlaces.length, 30)} de {filteredPlaces.length} destinos
               </span>
             </div>
 
             {/* Selected places chips */}
             {selectedPlaceIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+              <div className="flex flex-wrap gap-1.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
                 {selectedPlaceIds.map((pId) => {
                   const place = INITIAL_PLACES.find((p) => p.id === pId);
                   const isPrimary = primaryPlaceId === pId;
                   return (
                     <span
                       key={pId}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border ${
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-2xs transition-colors ${
                         isPrimary
-                          ? 'bg-[#E85B49]/10 text-[#E85B49] border-[#E85B49]/30'
-                          : 'bg-white text-slate-700 border-slate-200'
+                          ? 'bg-[#E85B49]/10 text-[#E85B49] border-[#E85B49]/40 font-semibold'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
                       }`}
                     >
                       <button
                         type="button"
                         onClick={() => setPrimaryPlaceId(pId)}
-                        title={isPrimary ? 'Lugar principal' : 'Establecer como principal'}
+                        title={isPrimary ? 'Lugar principal del video' : 'Establecer como destino principal'}
                         className="cursor-pointer"
                       >
                         <Star
                           className={`w-3.5 h-3.5 ${
-                            isPrimary ? 'fill-[#E85B49] text-[#E85B49]' : 'text-slate-400 hover:text-amber-500'
+                            isPrimary ? 'fill-[#E85B49] text-[#E85B49]' : 'text-slate-300 hover:text-amber-500'
                           }`}
                         />
                       </button>
-                      <span className="truncate max-w-[180px]">{place?.name || pId}</span>
+                      <span className="truncate max-w-[170px]">{place?.name || pId}</span>
+                      {place && (
+                        <span className="text-[10px] text-slate-400 capitalize">
+                          ({place.localityName})
+                        </span>
+                      )}
+                      {isPrimary && (
+                        <span className="px-1 py-0.2 rounded text-[9px] font-bold uppercase bg-[#E85B49] text-white">
+                          Principal
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleTogglePlace(pId)}
-                        className="text-slate-400 hover:text-red-500 cursor-pointer"
+                        title="Quitar asociación"
+                        className="text-slate-400 hover:text-red-500 cursor-pointer ml-0.5"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -679,36 +975,81 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
               </div>
             )}
 
-            {/* Search Input */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={placeSearch}
-                onChange={(e) => setPlaceSearch(e.target.value)}
-                placeholder="Buscar lugar por nombre o localidad (ej. Chan Chan, Huanchaco, El Rincón)..."
-                className="w-full text-xs pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
-              />
+            {/* Filters Toolbar: Search + Locality Filter + Category Filter */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+              <div className="sm:col-span-6 relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={placeSearch}
+                  onChange={(e) => setPlaceSearch(e.target.value)}
+                  placeholder="Buscar por nombre o calle (ej. Huanchaco, Chan Chan, Celler)..."
+                  className="w-full text-xs pl-8 pr-2.5 py-1.5 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#E85B49]"
+                />
+              </div>
+
+              <div className="sm:col-span-3">
+                <select
+                  value={placeLocalityFilter}
+                  onChange={(e) => setPlaceLocalityFilter(e.target.value)}
+                  className="w-full text-xs py-1.5 px-2 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#E85B49]"
+                >
+                  <option value="ALL">Todas las localidades</option>
+                  {LA_LIBERTAD_LOCALITIES.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-3">
+                <select
+                  value={placeCategoryFilter}
+                  onChange={(e) => setPlaceCategoryFilter(e.target.value)}
+                  className="w-full text-xs py-1.5 px-2 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#E85B49]"
+                >
+                  {PLACE_FILTER_CATEGORIES.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Available Places List */}
-            <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white">
+            <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white">
               {filteredPlaces.length === 0 ? (
-                <div className="p-4 text-center text-xs text-slate-400">
-                  No se encontraron lugares que coincidan con la búsqueda.
+                <div className="p-5 text-center text-xs text-slate-400 space-y-1">
+                  <p>No se encontraron lugares con los filtros actuales.</p>
+                  {(placeSearch || placeLocalityFilter !== 'ALL' || placeCategoryFilter !== 'ALL') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlaceSearch('');
+                        setPlaceLocalityFilter('ALL');
+                        setPlaceCategoryFilter('ALL');
+                      }}
+                      className="text-[#E85B49] hover:underline font-semibold text-xs cursor-pointer"
+                    >
+                      Restablecer filtros de búsqueda
+                    </button>
+                  )}
                 </div>
               ) : (
-                filteredPlaces.map((p) => {
+                filteredPlaces.slice(0, 40).map((p) => {
                   const isSelected = selectedPlaceIds.includes(p.id);
+                  const isPrimary = primaryPlaceId === p.id;
                   return (
                     <div
                       key={p.id}
                       onClick={() => handleTogglePlace(p.id)}
                       className={`px-3 py-2 text-xs flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${
-                        isSelected ? 'bg-amber-50/60 font-medium' : ''
+                        isSelected ? 'bg-amber-50/70 font-medium' : ''
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2.5 min-w-0">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -716,16 +1057,40 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
                           className="rounded text-[#E85B49] focus:ring-[#E85B49]"
                         />
                         <div className="min-w-0">
-                          <span className="text-slate-900 truncate block">{p.name}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-900 truncate block">{p.name}</span>
+                            {isPrimary && (
+                              <span className="px-1 py-0.2 rounded text-[9px] font-bold uppercase bg-[#E85B49] text-white">
+                                Principal
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] text-slate-400 capitalize block">
-                            {p.localityName} • {p.category}
+                            {p.localityName} • {p.category} {p.address ? `• ${p.address}` : ''}
                           </span>
                         </div>
                       </div>
 
-                      <span className="text-[10px] text-slate-400 shrink-0 font-mono">
-                        {p.rating ? `★ ${p.rating}` : ''}
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isSelected && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPrimaryPlaceId(p.id);
+                            }}
+                            title={isPrimary ? 'Es el destino principal' : 'Definir como principal'}
+                            className={`p-1 rounded cursor-pointer ${
+                              isPrimary ? 'text-[#E85B49]' : 'text-slate-300 hover:text-amber-500'
+                            }`}
+                          >
+                            <Star className={`w-3.5 h-3.5 ${isPrimary ? 'fill-[#E85B49]' : ''}`} />
+                          </button>
+                        )}
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {p.rating ? `★ ${p.rating}` : ''}
+                        </span>
+                      </div>
                     </div>
                   );
                 })

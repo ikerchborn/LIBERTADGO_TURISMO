@@ -40,6 +40,7 @@ export const AdminCreatorModerationView: React.FC = () => {
   // Video Tab State
   const [videos, setVideos] = useState<EnrichedVideoSubmission[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [platformFilter, setPlatformFilter] = useState<string>('ALL');
   const [videoSearchQuery, setVideoSearchQuery] = useState('');
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -90,15 +91,17 @@ export const AdminCreatorModerationView: React.FC = () => {
   });
   const [isTogglingVisibility, setIsTogglingVisibility] = useState(false);
 
-  // Approve Video Dialog State
+  // Approve Video Dialog State (supports approve, republish, reconsider)
   const [approveDialog, setApproveDialog] = useState<{
     isOpen: boolean;
     videoId: string;
     videoTitle: string;
+    actionType: 'approve' | 'republish' | 'reconsider';
   }>({
     isOpen: false,
     videoId: '',
     videoTitle: '',
+    actionType: 'approve',
   });
 
   const handleToggleCreatorVisibility = async () => {
@@ -194,7 +197,13 @@ export const AdminCreatorModerationView: React.FC = () => {
     }
   }, [activeTab, fetchVideos, fetchCreators]);
 
-  // Moderation quick actions (Approve, or open modal for Observe/Reject/Hide)
+  // Pending count for quick editorial badge
+  const pendingVideosCount = useMemo(
+    () => videos.filter((v) => v.status === 'PENDING').length,
+    [videos]
+  );
+
+  // Moderation quick actions with immediate in-memory reflection (Zero page reload)
   const handleModerateAction = async (
     id: string,
     action: 'APPROVE' | 'REJECT' | 'OBSERVE' | 'HIDE',
@@ -202,6 +211,28 @@ export const AdminCreatorModerationView: React.FC = () => {
     internalNotes?: string
   ) => {
     setProcessingId(id);
+
+    const actionToStatusMap: Record<'APPROVE' | 'REJECT' | 'OBSERVE' | 'HIDE', ModerationStatus> = {
+      APPROVE: 'APPROVED',
+      REJECT: 'REJECTED',
+      OBSERVE: 'OBSERVED',
+      HIDE: 'HIDDEN',
+    };
+    const targetStatus = actionToStatusMap[action];
+
+    // Optimistic in-memory update for instantaneous UI feedback without full page reload
+    setVideos((prev) =>
+      prev.map((v) =>
+        v.id === id
+          ? {
+              ...v,
+              status: targetStatus,
+              moderationNotes: reason || (action === 'APPROVE' ? undefined : v.moderationNotes),
+            }
+          : v
+      )
+    );
+
     try {
       const res = await fetch(`/api/admin/moderation/${id}/action`, {
         method: 'POST',
@@ -216,12 +247,20 @@ export const AdminCreatorModerationView: React.FC = () => {
         }),
       });
 
-      if (res.ok) {
-        // Refresh videos list
+      const json = await res.json();
+      if (json.success && json.data) {
+        // Synchronize with server returned submission record
+        setVideos((prev) =>
+          prev.map((v) => (v.id === id ? { ...v, ...json.data } : v))
+        );
+      } else {
+        // Fallback refresh
         fetchVideos();
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('[Admin Moderation Error]:', err);
+      // Revert/refresh on error
+      fetchVideos();
     } finally {
       setProcessingId(null);
     }
@@ -257,7 +296,7 @@ export const AdminCreatorModerationView: React.FC = () => {
     setActionModal((prev) => ({ ...prev, isOpen: false, reason: '', internalNotes: '' }));
   };
 
-  // Filtered lists
+  // Filtered lists with multi-field search (title, creator, category, locality, linked places) and platform/status filters
   const filteredVideos = useMemo(() => {
     const q = videoSearchQuery.toLowerCase().trim();
     return videos.filter((v) => {
@@ -270,12 +309,24 @@ export const AdminCreatorModerationView: React.FC = () => {
         (v.externalCreatorHandle && v.externalCreatorHandle.toLowerCase().includes(q)) ||
         (v.externalCreatorDisplayName && v.externalCreatorDisplayName.toLowerCase().includes(q)) ||
         v.category.toLowerCase().includes(q) ||
-        (v.localityId && v.localityId.toLowerCase().includes(q));
+        (v.localityId && v.localityId.toLowerCase().includes(q)) ||
+        (v.places &&
+          v.places.some((vp) => {
+            const pl = placesMap.get(vp.placeId);
+            return (
+              pl &&
+              (pl.name.toLowerCase().includes(q) ||
+                pl.localityName.toLowerCase().includes(q) ||
+                pl.category.toLowerCase().includes(q))
+            );
+          }));
 
       const matchesStatus = statusFilter === 'ALL' || v.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesPlatform = platformFilter === 'ALL' || v.platform.toLowerCase() === platformFilter.toLowerCase();
+
+      return matchesSearch && matchesStatus && matchesPlatform;
     });
-  }, [videos, videoSearchQuery, statusFilter]);
+  }, [videos, videoSearchQuery, statusFilter, platformFilter, placesMap]);
 
   const filteredCreators = useMemo(() => {
     const q = creatorSearchQuery.toLowerCase().trim();
@@ -351,6 +402,11 @@ export const AdminCreatorModerationView: React.FC = () => {
           >
             <Video className="w-3.5 h-3.5 text-[#E85B49]" />
             <span>Videos ({videos.length})</span>
+            {pendingVideosCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white font-mono animate-pulse">
+                {pendingVideosCount} pend.
+              </span>
+            )}
           </button>
 
           <button
@@ -374,8 +430,8 @@ export const AdminCreatorModerationView: React.FC = () => {
         <div className="space-y-6">
           {/* Controls Bar: Search, Filters, and New Video Button */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-            <div className="flex flex-1 flex-col sm:flex-row items-center gap-3">
-              <div className="relative w-full sm:w-72">
+            <div className="flex flex-1 flex-col sm:flex-row items-center gap-2.5">
+              <div className="relative w-full sm:w-64">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
@@ -391,10 +447,10 @@ export const AdminCreatorModerationView: React.FC = () => {
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="text-xs py-2 px-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#E85B49] font-medium"
+                  className="text-xs py-2 px-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#E85B49] font-medium"
                 >
                   <option value="ALL">Todos los estados</option>
-                  <option value="PENDING">Pendientes de Revisión</option>
+                  <option value="PENDING">Pendientes de Revisión ({pendingVideosCount})</option>
                   <option value="APPROVED">Aprobados (En Vivo)</option>
                   <option value="OBSERVED">Observados</option>
                   <option value="REJECTED">Rechazados</option>
@@ -402,10 +458,24 @@ export const AdminCreatorModerationView: React.FC = () => {
                 </select>
               </div>
 
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <span className="text-xs text-slate-500 whitespace-nowrap">Plataforma:</span>
+                <select
+                  value={platformFilter}
+                  onChange={(e) => setPlatformFilter(e.target.value)}
+                  className="text-xs py-2 px-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#E85B49] font-medium"
+                >
+                  <option value="ALL">Todas</option>
+                  <option value="tiktok">TikTok</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="youtube">YouTube</option>
+                </select>
+              </div>
+
               <button
                 onClick={fetchVideos}
                 title="Actualizar listado"
-                className="p-2 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs cursor-pointer"
+                className="p-2 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs cursor-pointer shrink-0"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoadingVideos ? 'animate-spin' : ''}`} />
               </button>

@@ -1038,6 +1038,80 @@ adminRouter.get('/dashboard', async (_req: Request, res: Response) => {
     );
     const topRecentActivity = recentActivity.slice(0, 8);
 
+    // 5. Generate Real Timeline Evolution (Past 6 months + historical distribution)
+    const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic'];
+    const now = new Date();
+    const timelineBucketsMap = new Map<string, { date: string; label: string; places: number; creators: number; videos: number; audits: number; total: number }>();
+
+    // Generate buckets for the last 6 months in chronological order
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+      timelineBucketsMap.set(key, {
+        date: key,
+        label,
+        places: 0,
+        creators: 0,
+        videos: 0,
+        audits: 0,
+        total: 0,
+      });
+    }
+
+    const getMonthKey = (iso?: string | null): string | null => {
+      if (!iso) return null;
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return null;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      } catch {
+        return null;
+      }
+    };
+
+    const recordToBucket = (iso: string | null | undefined, type: 'places' | 'creators' | 'videos' | 'audits') => {
+      const key = getMonthKey(iso);
+      if (!key) return;
+      let bucket = timelineBucketsMap.get(key);
+      if (!bucket) {
+        const [yearStr, monthStr] = key.split('-');
+        const monthIdx = parseInt(monthStr, 10) - 1;
+        const label = `${monthNames[monthIdx] || monthStr} ${yearStr}`;
+        bucket = {
+          date: key,
+          label,
+          places: 0,
+          creators: 0,
+          videos: 0,
+          audits: 0,
+          total: 0,
+        };
+        timelineBucketsMap.set(key, bucket);
+      }
+      bucket[type] += 1;
+      bucket.total += 1;
+    };
+
+    for (const c of allCreators) {
+      recordToBucket(c.createdAt, 'creators');
+    }
+    for (const v of uniqueSubmissions) {
+      recordToBucket(v.createdAt, 'videos');
+    }
+    for (const a of placeAuditLogs) {
+      recordToBucket(a.createdAt, 'places');
+    }
+    for (const a of creatorAuditLogs) {
+      recordToBucket(a.createdAt, 'audits');
+    }
+    for (const a of videoModerationLogs) {
+      recordToBucket(a.createdAt, 'audits');
+    }
+
+    // Sort timeline buckets chronologically
+    const timeline = Array.from(timelineBucketsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
     // Build comprehensive response
     const completeDashboardMetrics = {
       ...placeMetrics,
@@ -1069,6 +1143,7 @@ adminRouter.get('/dashboard', async (_req: Request, res: Response) => {
         totalExternalComments,
       },
       recentActivity: topRecentActivity,
+      timeline,
     };
 
     res.json({
