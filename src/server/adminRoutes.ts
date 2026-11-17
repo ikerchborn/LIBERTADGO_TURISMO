@@ -770,16 +770,318 @@ import { PlaceStatus, UnifiedAuditEntry, AuditModule } from '../types/adminCatal
 // 6. GET /api/admin/dashboard - Comprehensive system indicators
 adminRouter.get('/dashboard', async (_req: Request, res: Response) => {
   try {
-    const repo = getPlaceRepository();
-    const metrics = await repo.getDashboardMetrics();
+    const placeRepo = getPlaceRepository();
+    const creatorsRepo = getCreatorsRepository();
+
+    // Fetch place metrics and creators metrics in parallel
+    const [
+      placeMetrics,
+      creatorsAdminMetrics,
+      allCreators,
+      approvedVideosData,
+      pendingVideos,
+      observedVideos,
+      rejectedVideos,
+      placeAuditLogs,
+      creatorAuditLogs,
+      videoModerationLogs,
+    ] = await Promise.all([
+      placeRepo.getDashboardMetrics().catch((err) => {
+        console.error('[Admin Dashboard] Error fetching place metrics:', err);
+        return {
+          totalPlaces: 0,
+          publishedCount: 0,
+          draftCount: 0,
+          flaggedCount: 0,
+          archivedCount: 0,
+          verifiedCount: 0,
+          unverifiedCount: 0,
+          placesByCategory: [],
+          placesByLocality: [],
+          sourcesDistribution: [],
+          potentialDuplicatesCount: 0,
+          recentAuditLogs: [],
+        };
+      }),
+      creatorsRepo.getAdminMetrics().catch((err) => {
+        console.error('[Admin Dashboard] Error fetching creator admin metrics:', err);
+        return {
+          totalSubmissions: 0,
+          pendingCount: 0,
+          approvedCount: 0,
+          observedCount: 0,
+          rejectedCount: 0,
+          totalCreators: 0,
+        };
+      }),
+      creatorsRepo.listAllCreators().catch((err) => {
+        console.error('[Admin Dashboard] Error fetching creators:', err);
+        return [];
+      }),
+      creatorsRepo.listApprovedVideos({ limit: 1000 }).catch((err) => {
+        console.error('[Admin Dashboard] Error fetching approved videos:', err);
+        return { videos: [], total: 0 };
+      }),
+      creatorsRepo.listModerationQueue('PENDING').catch(() => []),
+      creatorsRepo.listModerationQueue('OBSERVED').catch(() => []),
+      creatorsRepo.listModerationQueue('REJECTED').catch(() => []),
+      placeRepo.getAuditLogs('all', 30).catch(() => []),
+      creatorsRepo.getCreatorAuditLogs('all', 30).catch(() => []),
+      creatorsRepo.getAllModerationLogs(30).catch(() => []),
+    ]);
+
+    // 1. Process Creators Data
+    const publicCreators = allCreators.filter((c) => c.isPublic);
+    const hiddenCreators = allCreators.filter((c) => !c.isPublic);
+    const verifiedCreators = allCreators.filter((c) => !!c.isVerified);
+
+    let totalAudienceFollowers = 0;
+    const creatorsWithAudience = allCreators.map((c) => {
+      const followers =
+        (c.tiktokFollowers || 0) +
+        (c.instagramFollowers || 0) +
+        (c.youtubeSubscribers || 0);
+      totalAudienceFollowers += followers;
+      return {
+        id: c.id,
+        handle: c.handle.startsWith('@') ? c.handle : `@${c.handle}`,
+        displayName: c.displayName,
+        avatarUrl: c.avatarUrl || null,
+        platform: c.primaryPlatform,
+        followers,
+        isVerified: !!c.isVerified,
+      };
+    });
+
+    // Top creators by audience
+    const topCreators = creatorsWithAudience
+      .sort((a, b) => b.followers - a.followers)
+      .slice(0, 5);
+
+    const creatorsByPlatform = {
+      tiktok: allCreators.filter((c) => String(c.primaryPlatform).toLowerCase() === 'tiktok').length,
+      instagram: allCreators.filter((c) => String(c.primaryPlatform).toLowerCase() === 'instagram').length,
+      youtube: allCreators.filter((c) => String(c.primaryPlatform).toLowerCase() === 'youtube').length,
+    };
+
+    // 2. Process Videos & Moderation Data
+    const approvedVideos = approvedVideosData.videos;
+    const allKnownSubmissions = [
+      ...approvedVideos,
+      ...pendingVideos,
+      ...observedVideos,
+      ...rejectedVideos,
+    ];
+
+    // Deduplicate submissions by id in case of overlap
+    const uniqueSubmissionsMap = new Map<string, typeof allKnownSubmissions[0]>();
+    for (const sub of allKnownSubmissions) {
+      if (sub && sub.id) {
+        uniqueSubmissionsMap.set(sub.id, sub);
+      }
+    }
+    const uniqueSubmissions = Array.from(uniqueSubmissionsMap.values());
+
+    const videoPlatformsCount = {
+      tiktok: uniqueSubmissions.filter((v) => String(v.platform).toLowerCase() === 'tiktok').length,
+      instagram: uniqueSubmissions.filter((v) => String(v.platform).toLowerCase() === 'instagram').length,
+      youtube: uniqueSubmissions.filter((v) => String(v.platform).toLowerCase() === 'youtube').length,
+    };
+
+    // Video Category breakdown
+    const categoryCountMap = new Map<string, number>();
+    for (const v of approvedVideos) {
+      const cat = v.category || 'general';
+      categoryCountMap.set(cat, (categoryCountMap.get(cat) || 0) + 1);
+    }
+    const videosByCategory = Array.from(categoryCountMap.entries())
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Place coverage by approved videos
+    const placeIdsWithVideos = new Set<string>();
+    for (const v of approvedVideos) {
+      if (Array.isArray(v.places)) {
+        for (const p of v.places) {
+          if (p && p.id) placeIdsWithVideos.add(p.id);
+        }
+      }
+    }
+    const placesWithVideosCount = placeIdsWithVideos.size;
+    const catalogCoveragePercent =
+      placeMetrics.totalPlaces > 0
+        ? Math.round((placesWithVideosCount / placeMetrics.totalPlaces) * 100)
+        : 0;
+
+    // 3. Process Engagement Data (Zero fake data, real accumulated counts)
+    let totalInternalViews = 0;
+    let totalInternalSaves = 0;
+    let totalExternalViews = 0;
+    let totalExternalLikes = 0;
+    let totalExternalComments = 0;
+
+    for (const v of uniqueSubmissions) {
+      totalInternalViews += v.internalViewsCount || 0;
+      totalInternalSaves += v.internalSavesCount || 0;
+      if (v.externalMetrics) {
+        totalExternalViews += v.externalMetrics.views || 0;
+        totalExternalLikes += v.externalMetrics.likes || 0;
+        totalExternalComments += v.externalMetrics.comments || 0;
+      }
+    }
+
+    // 4. Unified Recent Activity
+    const recentActivity: UnifiedAuditEntry[] = [];
+
+    // Place activity
+    for (const log of placeAuditLogs.slice(0, 15)) {
+      const catalogPlace = INITIAL_PLACES.find((p) => p.id === log.placeId);
+      const name =
+        log.newData?.name ||
+        log.previousData?.name ||
+        catalogPlace?.name ||
+        `Lugar #${log.placeId}`;
+      recentActivity.push({
+        id: log.id,
+        module: 'places' as AuditModule,
+        entityId: log.placeId,
+        entityName: name,
+        action: log.action,
+        adminUserId: log.adminUserId,
+        adminName: log.adminName || 'Administrador',
+        previousStatus: log.previousData?.status || null,
+        newStatus: log.newData?.status || null,
+        changeSummary: log.changeSummary,
+        createdAt: log.createdAt,
+      });
+    }
+
+    // Creator activity
+    for (const log of creatorAuditLogs.slice(0, 15)) {
+      const handle = log.creatorHandle ? `@${log.creatorHandle.replace(/^@+/, '')}` : '';
+      const displayName =
+        log.creatorDisplayName ||
+        log.newData?.displayName ||
+        log.previousData?.displayName ||
+        null;
+      const entityName = handle
+        ? `${handle}${displayName ? ` (${displayName})` : ''}`
+        : `Creador #${log.creatorId.slice(0, 8)}`;
+
+      recentActivity.push({
+        id: log.id,
+        module: 'creators' as AuditModule,
+        entityId: log.creatorId,
+        entityName,
+        action: log.action,
+        adminUserId: log.adminUserId,
+        adminName: log.adminName || 'Administrador',
+        previousStatus:
+          log.previousData?.isPublic !== undefined
+            ? log.previousData.isPublic
+              ? 'Público'
+              : 'Oculto'
+            : null,
+        newStatus:
+          log.newData?.isPublic !== undefined
+            ? log.newData.isPublic
+              ? 'Público'
+              : 'Oculto'
+            : null,
+        changeSummary: log.changeSummary,
+        createdAt: log.createdAt,
+      });
+    }
+
+    // Video activity
+    for (const log of videoModerationLogs.slice(0, 15)) {
+      const action =
+        log.action ||
+        (log.newStatus === 'APPROVED'
+          ? 'APPROVE'
+          : log.newStatus === 'REJECTED'
+          ? 'REJECT'
+          : log.newStatus === 'OBSERVED'
+          ? 'OBSERVE'
+          : 'UPDATE');
+
+      let summary = `Moderación: ${action} (${log.newStatus})`;
+      if (log.reason) summary += ` - Motivo: ${log.reason}`;
+      if (log.internalNotes && !log.internalNotes.startsWith('__METADATA_START__')) {
+        summary += ` - ${log.internalNotes}`;
+      }
+
+      const vTitle = log.videoTitle;
+      const vPlatform = log.videoPlatform;
+      const entityName = vTitle
+        ? `${vPlatform ? `[${String(vPlatform).toUpperCase()}] ` : ''}${vTitle}`
+        : `Video #${log.videoId.slice(0, 8)}`;
+
+      recentActivity.push({
+        id: log.id,
+        module: 'videos' as AuditModule,
+        entityId: log.videoId,
+        entityName,
+        action,
+        adminUserId: log.adminUserId,
+        adminName: log.adminName || 'Administrador',
+        previousStatus: log.previousStatus || null,
+        newStatus: log.newStatus || null,
+        changeSummary: summary,
+        createdAt: log.createdAt,
+      });
+    }
+
+    // Sort unified activity descending by date and keep top 8
+    recentActivity.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    const topRecentActivity = recentActivity.slice(0, 8);
+
+    // Build comprehensive response
+    const completeDashboardMetrics = {
+      ...placeMetrics,
+      creators: {
+        total: allCreators.length,
+        publicCount: publicCreators.length,
+        hiddenCount: hiddenCreators.length,
+        verifiedCount: verifiedCreators.length,
+        byPlatform: creatorsByPlatform,
+        totalAudienceFollowers,
+        topCreators,
+      },
+      videos: {
+        total: creatorsAdminMetrics.totalSubmissions,
+        approved: creatorsAdminMetrics.approvedCount,
+        pending: creatorsAdminMetrics.pendingCount,
+        observed: creatorsAdminMetrics.observedCount,
+        rejected: creatorsAdminMetrics.rejectedCount,
+        byPlatform: videoPlatformsCount,
+        byCategory: videosByCategory,
+        placesWithVideosCount,
+        catalogCoveragePercent,
+      },
+      engagement: {
+        totalInternalViews,
+        totalInternalSaves,
+        totalExternalViews,
+        totalExternalLikes,
+        totalExternalComments,
+      },
+      recentActivity: topRecentActivity,
+    };
+
     res.json({
       success: true,
-      data: metrics,
+      data: completeDashboardMetrics,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
     console.error('[Admin Error] Error fetching admin dashboard metrics:', err);
-    res.status(500).json({ success: false, error: 'Error al generar indicadores del panel administrativo' });
+    res.status(500).json({
+      success: false,
+      error: 'Error al generar indicadores del panel administrativo',
+    });
   }
 });
 
@@ -1268,26 +1570,35 @@ adminRouter.get('/audit', async (req: Request, res: Response) => {
     // Filter by search text
     if (searchFilter) {
       allEntries = allEntries.filter((e) => {
-        const matchesEntity = e.entityName.toLowerCase().includes(searchFilter) || e.entityId.toLowerCase().includes(searchFilter);
+        const matchesEntity =
+          e.entityName.toLowerCase().includes(searchFilter) ||
+          e.entityId.toLowerCase().includes(searchFilter);
         const matchesSummary = e.changeSummary.toLowerCase().includes(searchFilter);
-        const matchesAdmin = e.adminName.toLowerCase().includes(searchFilter);
+        const matchesAdmin =
+          e.adminName.toLowerCase().includes(searchFilter) ||
+          (e.adminUserId && e.adminUserId.toLowerCase().includes(searchFilter));
         const matchesAction = e.action.toLowerCase().includes(searchFilter);
         return matchesEntity || matchesSummary || matchesAdmin || matchesAction;
       });
     }
 
-    // Filter by date range
+    // Filter by date range (normalized UTC boundaries)
     if (startDateFilter) {
-      const startTime = new Date(startDateFilter).getTime();
+      const normalizedStart =
+        startDateFilter.length === 10 && !startDateFilter.includes('T')
+          ? `${startDateFilter}T00:00:00.000Z`
+          : startDateFilter;
+      const startTime = new Date(normalizedStart).getTime();
       if (!isNaN(startTime)) {
         allEntries = allEntries.filter((e) => new Date(e.createdAt).getTime() >= startTime);
       }
     }
     if (endDateFilter) {
-      let endTime = new Date(endDateFilter).getTime();
-      if (endDateFilter.length === 10 && !endDateFilter.includes('T')) {
-        endTime = new Date(`${endDateFilter}T23:59:59.999Z`).getTime();
-      }
+      const normalizedEnd =
+        endDateFilter.length === 10 && !endDateFilter.includes('T')
+          ? `${endDateFilter}T23:59:59.999Z`
+          : endDateFilter;
+      const endTime = new Date(normalizedEnd).getTime();
       if (!isNaN(endTime)) {
         allEntries = allEntries.filter((e) => new Date(e.createdAt).getTime() <= endTime);
       }

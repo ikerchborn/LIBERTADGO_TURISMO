@@ -87,4 +87,50 @@ export interface AdminDashboardMetrics {
   sourcesDistribution: { sourceId: string; count: number }[];
   potentialDuplicatesCount: number;
   recentAuditLogs: PlaceAuditEntry[];
+  // Extended RiyMo Platform Metrics
+  creators?: {
+    total: number;
+    publicCount: number;
+    hiddenCount: number;
+    verifiedCount: number;
+    byPlatform: {
+      tiktok: number;
+      instagram: number;
+      youtube: number;
+    };
+    totalAudienceFollowers: number;
+    topCreators: Array<{
+      id: string;
+      handle: string;
+      displayName: string;
+      avatarUrl?: string | null;
+      platform: string;
+      followers: number;
+      isVerified?: boolean;
+    }>;
+  };
+  videos?: {
+    total: number;
+    approved: number;
+    pending: number;
+    observed: number;
+    rejected: number;
+    byPlatform: {
+      tiktok: number;
+      instagram: number;
+      youtube: number;
+    };
+    byCategory: Array<{ category: string; count: number }>;
+    placesWithVideosCount: number;
+    catalogCoveragePercent: number;
+  };
+  engagement?: {
+    totalInternalViews: number;
+    totalInternalSaves: number;
+    totalExternalViews: number;
+    totalExternalLikes: number;
+    totalExternalComments: number;
+  };
+  recentActivity?: UnifiedAuditEntry[];
 }
+

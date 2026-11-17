@@ -30,11 +30,10 @@ test('Unified Administrative Audit: Multi-module traceability across Places, Cre
   const place = await placeRepo.createPlace(
     {
       name: 'Complejo Arqueológico El Brujo',
-      category: 'sitios_arqueologicos',
+      category: 'arqueologia',
       localityId: 'magdalena_de_cao',
-      description: 'Hogar de la Dama de Cao en el valle Chicama',
-      latitude: -7.917,
-      longitude: -79.303,
+      fullDescription: 'Hogar de la Dama de Cao en el valle Chicama',
+      coordinates: { lat: -7.917, lng: -79.303 },
       tags: ['arqueologia', 'moche'],
       shortDescription: 'Cuna de la Dama de Cao',
       address: 'Magdalena de Cao, Ascope',
@@ -216,13 +215,30 @@ test('Unified Administrative Audit: Multi-module traceability across Places, Cre
   assert.equal(visibilityActionResult.success, true);
   assert.ok(visibilityActionResult.data.every((e: any) => e.action === 'VISIBILITY_CHANGE'));
 
-  // Test 9: Deduplication & ID Uniqueness
+  // Test 9: Search by Admin User ID
+  const searchAdminIdResult = await queryAudit(`search=${admin.id}`);
+  assert.equal(searchAdminIdResult.success, true);
+  assert.ok(searchAdminIdResult.data.length >= 3, 'Should find events associated with this adminUserId');
+
+  // Test 10: Date range filtering
+  const today = new Date().toISOString().slice(0, 10);
+  const todayResult = await queryAudit(`startDate=${today}&endDate=${today}`);
+  assert.equal(todayResult.success, true);
+  assert.ok(todayResult.data.length >= 3, 'All newly created events should fall on today');
+
+  // Test 11: Deduplication & ID Uniqueness & Sort Order (DESC)
   const allEvents = await queryAudit('module=ALL&limit=200');
   const allIds = allEvents.data.map((e: any) => e.id);
   const uniqueIds = new Set(allIds);
   assert.equal(uniqueIds.size, allIds.length, 'Audit entries must have globally unique IDs and zero duplicates');
 
-  // Test 10: Security check - No sensitive secrets in audit logs
+  for (let i = 0; i < allEvents.data.length - 1; i++) {
+    const curTime = new Date(allEvents.data[i].createdAt).getTime();
+    const nextTime = new Date(allEvents.data[i + 1].createdAt).getTime();
+    assert.ok(curTime >= nextTime, 'Events must be sorted in descending chronological order');
+  }
+
+  // Test 12: Security check - No sensitive secrets in audit logs
   for (const item of allEvents.data) {
     const jsonStr = JSON.stringify(item);
     assert.ok(!jsonStr.includes('passwordHash'), 'Audit log must never expose password hashes');
