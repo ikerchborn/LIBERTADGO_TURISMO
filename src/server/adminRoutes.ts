@@ -629,6 +629,22 @@ adminRouter.put('/creators/:id', async (req: Request, res: Response) => {
   }
 });
 
+// 5f. GET /api/admin/creators/:id/history - Audit trail for specific creator profile
+adminRouter.get('/creators/:id/history', async (req: Request, res: Response) => {
+  try {
+    const repo = getCreatorsRepository();
+    const logs = await repo.getCreatorAuditLogs(req.params.id, 50);
+    res.json({
+      success: true,
+      data: logs,
+      creatorId: req.params.id,
+    });
+  } catch (err) {
+    console.error('[Admin Error] Error fetching creator history:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar historial del creador' });
+  }
+});
+
 // 5e. GET /api/admin/users - List users for creator profile association
 adminRouter.get('/users', async (_req: Request, res: Response) => {
   try {
@@ -1110,52 +1126,64 @@ adminRouter.get('/audit', async (req: Request, res: Response) => {
     ]);
 
     // Map Places entries
-    const placeEntries: UnifiedAuditEntry[] = placeLogs.map((log) => ({
-      id: log.id,
-      module: 'places' as AuditModule,
-      entityId: log.placeId,
-      entityName: log.newData?.name || log.previousData?.name || `Lugar #${log.placeId}`,
-      action: log.action,
-      adminUserId: log.adminUserId,
-      adminName: log.adminName || 'Administrador',
-      previousStatus: log.previousData?.status || null,
-      newStatus: log.newData?.status || null,
-      changeSummary: log.changeSummary,
-      details: {
-        previousData: log.previousData,
-        newData: log.newData,
-      },
-      createdAt: log.createdAt,
-    }));
+    const placeEntries: UnifiedAuditEntry[] = placeLogs.map((log) => {
+      const catalogPlace = INITIAL_PLACES.find((p) => p.id === log.placeId);
+      const name = log.newData?.name || log.previousData?.name || catalogPlace?.name || `Lugar #${log.placeId}`;
+      return {
+        id: log.id,
+        module: 'places' as AuditModule,
+        entityId: log.placeId,
+        entityName: name,
+        action: log.action,
+        adminUserId: log.adminUserId,
+        adminName: log.adminName || 'Administrador',
+        previousStatus: log.previousData?.status || null,
+        newStatus: log.newData?.status || null,
+        changeSummary: log.changeSummary,
+        details: {
+          previousData: log.previousData,
+          newData: log.newData,
+        },
+        createdAt: log.createdAt,
+      };
+    });
 
     // Map Creators entries
-    const creatorEntries: UnifiedAuditEntry[] = creatorLogs.map((log) => ({
-      id: log.id,
-      module: 'creators' as AuditModule,
-      entityId: log.creatorId,
-      entityName: log.creatorHandle ? `@${log.creatorHandle.replace('@', '')}` : `Creador #${log.creatorId.slice(0, 8)}`,
-      action: log.action,
-      adminUserId: log.adminUserId,
-      adminName: log.adminName || 'Administrador',
-      previousStatus:
-        log.previousData?.isPublic !== undefined
-          ? log.previousData.isPublic
-            ? 'Público'
-            : 'Oculto'
-          : null,
-      newStatus:
-        log.newData?.isPublic !== undefined
-          ? log.newData.isPublic
-            ? 'Público'
-            : 'Oculto'
-          : null,
-      changeSummary: log.changeSummary,
-      details: {
-        previousData: log.previousData,
-        newData: log.newData,
-      },
-      createdAt: log.createdAt,
-    }));
+    const creatorEntries: UnifiedAuditEntry[] = creatorLogs.map((log) => {
+      const handle = log.creatorHandle ? `@${log.creatorHandle.replace(/^@+/, '')}` : '';
+      const displayName = log.creatorDisplayName || log.newData?.displayName || log.previousData?.displayName || null;
+      const entityName = handle
+        ? `${handle}${displayName ? ` (${displayName})` : ''}`
+        : `Creador #${log.creatorId.slice(0, 8)}`;
+
+      return {
+        id: log.id,
+        module: 'creators' as AuditModule,
+        entityId: log.creatorId,
+        entityName,
+        action: log.action,
+        adminUserId: log.adminUserId,
+        adminName: log.adminName || 'Administrador',
+        previousStatus:
+          log.previousData?.isPublic !== undefined
+            ? log.previousData.isPublic
+              ? 'Público'
+              : 'Oculto'
+            : null,
+        newStatus:
+          log.newData?.isPublic !== undefined
+            ? log.newData.isPublic
+              ? 'Público'
+              : 'Oculto'
+            : null,
+        changeSummary: log.changeSummary,
+        details: {
+          previousData: log.previousData,
+          newData: log.newData,
+        },
+        createdAt: log.createdAt,
+      };
+    });
 
     // Map Videos entries
     const videoEntries: UnifiedAuditEntry[] = videoLogs.map((log) => {
@@ -1175,11 +1203,17 @@ adminRouter.get('/audit', async (req: Request, res: Response) => {
         summary += ` - ${log.internalNotes}`;
       }
 
+      const vTitle = log.videoTitle;
+      const vPlatform = log.videoPlatform;
+      const entityName = vTitle
+        ? `${vPlatform ? `[${String(vPlatform).toUpperCase()}] ` : ''}${vTitle}`
+        : `Video #${log.videoId.slice(0, 8)}`;
+
       return {
         id: log.id,
         module: 'videos' as AuditModule,
         entityId: log.videoId,
-        entityName: `Video #${log.videoId.slice(0, 8)}`,
+        entityName,
         action,
         adminUserId: log.adminUserId,
         adminName: log.adminName || 'Administrador',
@@ -1192,6 +1226,8 @@ adminRouter.get('/audit', async (req: Request, res: Response) => {
           changedFields: log.changedFields,
           previousStatus: log.previousStatus,
           newStatus: log.newStatus,
+          videoTitle: log.videoTitle,
+          videoPlatform: log.videoPlatform,
         },
         createdAt: log.createdAt,
       };

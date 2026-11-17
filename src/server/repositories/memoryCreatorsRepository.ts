@@ -413,8 +413,8 @@ export class MemoryCreatorsRepository implements IAuthRepository, ICreatorsRepos
       paginated.map(async (v) => {
         const places = await this.getPlacesForVideo(v.id);
         const creatorProfile = v.creatorProfileId
-        ? this.creatorProfiles.get(v.creatorProfileId) || null
-        : null;
+          ? this.creatorProfiles.get(v.creatorProfileId) || null
+          : (v.userId ? Array.from(this.creatorProfiles.values()).find((cp) => cp.userId === v.userId) || null : null);
         const user = this.users.get(v.userId);
 
         return {
@@ -530,7 +530,14 @@ export class MemoryCreatorsRepository implements IAuthRepository, ICreatorsRepos
   }
 
   async getAllModerationLogs(limit: number = 100): Promise<VideoModerationLog[]> {
-    return this.moderationLogs.slice(0, limit).map((l) => ({ ...l }));
+    return this.moderationLogs.slice(0, limit).map((l) => {
+      const v = this.videoSubmissions.get(l.videoId);
+      return {
+        ...l,
+        videoTitle: v?.title || null,
+        videoPlatform: v?.platform || null,
+      };
+    });
   }
 
   async addCreatorAuditLog(entry: {
@@ -548,6 +555,7 @@ export class MemoryCreatorsRepository implements IAuthRepository, ICreatorsRepos
       id,
       creatorId: entry.creatorId,
       creatorHandle: entry.creatorHandle,
+      creatorDisplayName: entry.newData?.displayName || entry.previousData?.displayName || null,
       adminUserId: entry.adminUserId,
       adminName: entry.adminName,
       action: entry.action,

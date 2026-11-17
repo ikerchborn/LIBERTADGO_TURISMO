@@ -28,6 +28,7 @@ export interface CreatorAuditEntry {
   id: string;
   creatorId: string;
   creatorHandle: string;
+  creatorDisplayName?: string | null;
   adminUserId: string;
   adminName: string;
   action: 'CREATE' | 'UPDATE' | 'VISIBILITY_CHANGE';

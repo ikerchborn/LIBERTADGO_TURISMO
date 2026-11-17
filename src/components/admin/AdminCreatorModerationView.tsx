@@ -25,6 +25,7 @@ import { INITIAL_PLACES } from '../../data/initialPlaces.ts';
 import { VideoEditorModal } from './VideoEditorModal.tsx';
 import { CreatorEditorModal } from './CreatorEditorModal.tsx';
 import { VideoHistoryModal } from './VideoHistoryModal.tsx';
+import { CreatorHistoryModal } from './CreatorHistoryModal.tsx';
 import { resolveCreatorLabel } from '../../utils/videoAdapter.ts';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 
@@ -56,6 +57,7 @@ export const AdminCreatorModerationView: React.FC = () => {
   const [editingCreator, setEditingCreator] = useState<CreatorProfile | undefined>(undefined);
 
   const [historyVideo, setHistoryVideo] = useState<{ id: string; title: string } | null>(null);
+  const [historyCreator, setHistoryCreator] = useState<{ id: string; handle: string; name?: string } | null>(null);
 
   // Reason Modal for OBSERVE / REJECT
   const [actionModal, setActionModal] = useState<{
@@ -876,16 +878,33 @@ export const AdminCreatorModerationView: React.FC = () => {
                       )}
                     </button>
 
-                    <button
-                      onClick={() => {
-                        setEditingCreator(creator);
-                        setIsCreatorModalOpen(true);
-                      }}
-                      className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                    >
-                      <Edit2 className="w-3 h-3 text-slate-400" />
-                      <span>Editar</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() =>
+                          setHistoryCreator({
+                            id: creator.id,
+                            handle: creator.handle,
+                            name: creator.displayName,
+                          })
+                        }
+                        className="px-2.5 py-1 text-slate-600 hover:text-[#E85B49] bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Ver historial de cambios"
+                      >
+                        <History className="w-3 h-3 text-slate-400" />
+                        <span>Historial</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setEditingCreator(creator);
+                          setIsCreatorModalOpen(true);
+                        }}
+                        className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Edit2 className="w-3 h-3 text-slate-400" />
+                        <span>Editar</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -928,6 +947,19 @@ export const AdminCreatorModerationView: React.FC = () => {
           onClose={() => setHistoryVideo(null)}
           videoId={historyVideo.id}
           videoTitle={historyVideo.title}
+        />
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CREATOR AUDIT HISTORY */}
+      {/* ============================================================== */}
+      {historyCreator && (
+        <CreatorHistoryModal
+          isOpen={!!historyCreator}
+          onClose={() => setHistoryCreator(null)}
+          creatorId={historyCreator.id}
+          creatorHandle={historyCreator.handle}
+          creatorName={historyCreator.name}
         />
       )}
 

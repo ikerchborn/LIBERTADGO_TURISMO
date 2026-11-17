@@ -471,6 +471,69 @@ export const AuditView: React.FC = () => {
           </div>
         </div>
 
+        {/* Quick Date Presets */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
+          <span className="text-slate-400 font-medium mr-1 flex items-center gap-1">
+            <Calendar className="w-3 h-3 text-slate-400" />
+            <span>Rango rápido:</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setStartDate('');
+              setEndDate('');
+            }}
+            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+              !startDate && !endDate
+                ? 'bg-slate-900 text-white font-semibold'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Todo el historial
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const today = new Date().toISOString().slice(0, 10);
+              setStartDate(today);
+              setEndDate(today);
+            }}
+            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+              startDate && startDate === endDate && startDate === new Date().toISOString().slice(0, 10)
+                ? 'bg-[#E85B49] text-white font-semibold'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Hoy
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const today = new Date();
+              const past7 = new Date();
+              past7.setDate(today.getDate() - 7);
+              setStartDate(past7.toISOString().slice(0, 10));
+              setEndDate(today.toISOString().slice(0, 10));
+            }}
+            className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            Últimos 7 días
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const today = new Date();
+              const past30 = new Date();
+              past30.setDate(today.getDate() - 30);
+              setStartDate(past30.toISOString().slice(0, 10));
+              setEndDate(today.toISOString().slice(0, 10));
+            }}
+            className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            Últimos 30 días
+          </button>
+        </div>
+
         {/* Active Filters Pill Bar */}
         {(activeModule !== 'ALL' || actionFilter !== 'ALL' || search || startDate || endDate) && (
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-[11px] text-slate-600">

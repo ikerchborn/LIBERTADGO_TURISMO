@@ -171,4 +171,61 @@ test('Unified Administrative Audit: Multi-module traceability across Places, Cre
   assert.equal(pagedResult.data.length, 1);
   assert.equal(pagedResult.limit, 1);
   assert.ok(pagedResult.totalPages >= 3);
+
+  // Test 7: Individual history endpoints
+  const queryEndpoint = async (path: string) => {
+    const server = app.listen(0);
+    const port = (server.address() as any).port;
+    try {
+      const res = await fetch(`http://localhost:${port}${path}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } finally {
+      server.close();
+    }
+  };
+
+  // 7a. Place individual history
+  const placeHistory = await queryEndpoint(`/api/admin/places/${place.id}/history`);
+  assert.equal(placeHistory.success, true);
+  assert.ok(Array.isArray(placeHistory.data));
+  assert.ok(placeHistory.data.length >= 1);
+  assert.equal(placeHistory.data[0].placeId, place.id);
+
+  // 7b. Video individual history
+  const videoHistory = await queryEndpoint(`/api/admin/moderation/${video.id}/history`);
+  assert.equal(videoHistory.success, true);
+  assert.ok(Array.isArray(videoHistory.data));
+  assert.ok(videoHistory.data.length >= 1);
+  assert.equal(videoHistory.data[0].videoId, video.id);
+
+  // 7c. Creator individual history
+  const creatorHistory = await queryEndpoint(`/api/admin/creators/${creator.id}/history`);
+  assert.equal(creatorHistory.success, true);
+  assert.ok(Array.isArray(creatorHistory.data));
+  assert.ok(creatorHistory.data.length >= 2);
+  assert.equal(creatorHistory.data[0].creatorId, creator.id);
+
+  // Test 8: Filter by action
+  const createActionResult = await queryAudit('action=CREATE');
+  assert.equal(createActionResult.success, true);
+  assert.ok(createActionResult.data.every((e: any) => e.action === 'CREATE'));
+
+  const visibilityActionResult = await queryAudit('action=VISIBILITY_CHANGE');
+  assert.equal(visibilityActionResult.success, true);
+  assert.ok(visibilityActionResult.data.every((e: any) => e.action === 'VISIBILITY_CHANGE'));
+
+  // Test 9: Deduplication & ID Uniqueness
+  const allEvents = await queryAudit('module=ALL&limit=200');
+  const allIds = allEvents.data.map((e: any) => e.id);
+  const uniqueIds = new Set(allIds);
+  assert.equal(uniqueIds.size, allIds.length, 'Audit entries must have globally unique IDs and zero duplicates');
+
+  // Test 10: Security check - No sensitive secrets in audit logs
+  for (const item of allEvents.data) {
+    const jsonStr = JSON.stringify(item);
+    assert.ok(!jsonStr.includes('passwordHash'), 'Audit log must never expose password hashes');
+    assert.ok(!jsonStr.includes('sessionSecret'), 'Audit log must never expose session secrets');
+  }
 });

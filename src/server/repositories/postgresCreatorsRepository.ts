@@ -92,6 +92,8 @@ export function parseModerationLogRow(row: any): VideoModerationLog {
     reason: row.reason || null,
     internalNotes: cleanNotes,
     changedFields,
+    videoTitle: row.videoTitle || null,
+    videoPlatform: row.videoPlatform || null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
   };
 }
@@ -831,11 +833,13 @@ export class PostgresCreatorsRepository implements IAuthRepository, ICreatorsRep
 
   async getAllModerationLogs(limit: number = 100): Promise<VideoModerationLog[]> {
     const res = await this.pool.query(
-      `SELECT id, video_id as "videoId", admin_user_id as "adminUserId", admin_name as "adminName",
-              previous_status as "previousStatus", new_status as "newStatus", reason, internal_notes as "internalNotes",
-              created_at as "createdAt"
-       FROM video_moderation_logs
-       ORDER BY created_at DESC
+      `SELECT vml.id, vml.video_id as "videoId", vml.admin_user_id as "adminUserId", vml.admin_name as "adminName",
+              vml.previous_status as "previousStatus", vml.new_status as "newStatus", vml.reason, vml.internal_notes as "internalNotes",
+              vml.created_at as "createdAt",
+              vs.title as "videoTitle", vs.platform as "videoPlatform"
+       FROM video_moderation_logs vml
+       LEFT JOIN video_submissions vs ON vs.id = vml.video_id
+       ORDER BY vml.created_at DESC
        LIMIT $1`,
       [limit]
     );
@@ -858,6 +862,7 @@ export class PostgresCreatorsRepository implements IAuthRepository, ICreatorsRep
       id,
       creatorId: entry.creatorId,
       creatorHandle: entry.creatorHandle,
+      creatorDisplayName: entry.newData?.displayName || entry.previousData?.displayName || null,
       adminUserId: entry.adminUserId,
       adminName: entry.adminName,
       action: entry.action,
@@ -898,28 +903,42 @@ export class PostgresCreatorsRepository implements IAuthRepository, ICreatorsRep
     try {
       const query =
         creatorId && creatorId !== 'all'
-          ? `SELECT id, creator_id as "creatorId", admin_user_id as "adminUserId", admin_name as "adminName",
-                    action, previous_data as "previousData", new_data as "newData",
-                    change_summary as "changeSummary", created_at as "createdAt"
-             FROM creator_audit_logs WHERE creator_id = $1 ORDER BY created_at DESC LIMIT $2`
-          : `SELECT id, creator_id as "creatorId", admin_user_id as "adminUserId", admin_name as "adminName",
-                    action, previous_data as "previousData", new_data as "newData",
-                    change_summary as "changeSummary", created_at as "createdAt"
-             FROM creator_audit_logs ORDER BY created_at DESC LIMIT $1`;
+          ? `SELECT cal.id, cal.creator_id as "creatorId", cal.admin_user_id as "adminUserId", cal.admin_name as "adminName",
+                    cal.action, cal.previous_data as "previousData", cal.new_data as "newData",
+                    cal.change_summary as "changeSummary", cal.created_at as "createdAt",
+                    COALESCE(cp.handle, '') as "creatorHandle",
+                    COALESCE(cp.display_name, '') as "creatorDisplayName"
+             FROM creator_audit_logs cal
+             LEFT JOIN creator_profiles cp ON cp.id = cal.creator_id
+             WHERE cal.creator_id = $1
+             ORDER BY cal.created_at DESC LIMIT $2`
+          : `SELECT cal.id, cal.creator_id as "creatorId", cal.admin_user_id as "adminUserId", cal.admin_name as "adminName",
+                    cal.action, cal.previous_data as "previousData", cal.new_data as "newData",
+                    cal.change_summary as "changeSummary", cal.created_at as "createdAt",
+                    COALESCE(cp.handle, '') as "creatorHandle",
+                    COALESCE(cp.display_name, '') as "creatorDisplayName"
+             FROM creator_audit_logs cal
+             LEFT JOIN creator_profiles cp ON cp.id = cal.creator_id
+             ORDER BY cal.created_at DESC LIMIT $1`;
       const params = creatorId && creatorId !== 'all' ? [creatorId, limit] : [limit];
       const res = await this.pool.query(query, params);
-      return res.rows.map((r) => ({
-        id: r.id,
-        creatorId: r.creatorId,
-        creatorHandle: '',
-        adminUserId: r.adminUserId,
-        adminName: r.adminName,
-        action: r.action,
-        previousData: r.previousData,
-        newData: r.newData,
-        changeSummary: r.changeSummary,
-        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
-      }));
+      return res.rows.map((r) => {
+        const handle = r.creatorHandle || r.newData?.handle || r.previousData?.handle || '';
+        const displayName = r.creatorDisplayName || r.newData?.displayName || r.previousData?.displayName || null;
+        return {
+          id: r.id,
+          creatorId: r.creatorId,
+          creatorHandle: handle,
+          creatorDisplayName: displayName,
+          adminUserId: r.adminUserId,
+          adminName: r.adminName,
+          action: r.action,
+          previousData: r.previousData,
+          newData: r.newData,
+          changeSummary: r.changeSummary,
+          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        };
+      });
     } catch {
       let filtered = this.creatorAuditBuffer;
       if (creatorId && creatorId !== 'all') {

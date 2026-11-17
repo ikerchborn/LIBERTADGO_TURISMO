@@ -131,6 +131,8 @@ export interface VideoModerationLog {
   reason?: string | null;
   internalNotes?: string | null;
   changedFields?: string[] | null;
+  videoTitle?: string | null;
+  videoPlatform?: VideoPlatform | string | null;
   createdAt: string;
 }
 
