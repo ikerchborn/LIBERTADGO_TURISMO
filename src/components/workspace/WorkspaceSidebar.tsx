@@ -5,7 +5,8 @@ import {
   FileText,
   Bookmark,
   Calendar,
-  Trophy
+  Trophy,
+  Plus
 } from 'lucide-react';
 import { TripItinerary } from '../../types/catalog.ts';
 import { generateDayList } from '../../utils/dateUtils.ts';
@@ -20,12 +21,13 @@ export type WorkspaceSection =
   | 'itinerary';
 
 interface WorkspaceSidebarProps {
-  trip: TripItinerary;
+  trip: TripItinerary | null;
   activeSection: WorkspaceSection;
   onSelectSection: (section: WorkspaceSection) => void;
   selectedDayNumber: number | null;
   onSelectDayNumber: (day: number | null) => void;
   totalPlacesCount?: number;
+  onOpenCreateModal?: () => void;
 }
 
 export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
@@ -35,10 +37,11 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   selectedDayNumber,
   onSelectDayNumber,
   totalPlacesCount,
+  onOpenCreateModal,
 }) => {
-  const dayItems = generateDayList(trip.startDate, trip.totalDays);
-  const savedCount = trip.savedPlaceIds?.length || 0;
-  const totalActivities = trip.activities.length;
+  const dayItems = trip ? generateDayList(trip.startDate, trip.totalDays) : [];
+  const savedCount = trip?.savedPlaceIds?.length || 0;
+  const totalActivities = trip?.activities.length || 0;
 
   const sectionNavRef = useRef<HTMLDivElement>(null);
   const sectionButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -239,8 +242,8 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           </button>
         </HorizontalScrollContainer>
 
-        {/* Sub-selector de días si está en itinerario */}
-        {activeSection === 'itinerary' && (
+        {/* Sub-selector de días si está en itinerario con viaje activo */}
+        {trip && activeSection === 'itinerary' && (
           <HorizontalScrollContainer
             innerRef={mobileDaysNavRef}
             containerClassName="w-full bg-slate-50 border-b border-[#E9E7E1]"
@@ -414,64 +417,84 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              onSelectSection('itinerary');
-              onSelectDayNumber(null);
-            }}
-            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer text-left mb-1 ${
-              activeSection === 'itinerary' && selectedDayNumber === null
-                ? 'bg-[#263B35] text-white font-medium'
-                : 'text-[#263B35] hover:bg-slate-50'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Calendar className="w-3.5 h-3.5 opacity-80" />
-              <span>Todos los días</span>
-            </div>
-          </button>
+          {trip ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectSection('itinerary');
+                  onSelectDayNumber(null);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer text-left mb-1 ${
+                  activeSection === 'itinerary' && selectedDayNumber === null
+                    ? 'bg-[#263B35] text-white font-medium'
+                    : 'text-[#263B35] hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-3.5 h-3.5 opacity-80" />
+                  <span>Todos los días</span>
+                </div>
+              </button>
 
-          <div className="space-y-0.5 ml-1 pl-2 border-l border-[#E9E7E1]">
-            {dayItems.map((day) => {
-              const dayCount = trip.activities.filter((a) => a.dayNumber === day.dayNumber).length;
-              const isSelected = activeSection === 'itinerary' && selectedDayNumber === day.dayNumber;
+              <div className="space-y-0.5 ml-1 pl-2 border-l border-[#E9E7E1]">
+                {dayItems.map((day) => {
+                  const dayCount = trip.activities.filter((a) => a.dayNumber === day.dayNumber).length;
+                  const isSelected = activeSection === 'itinerary' && selectedDayNumber === day.dayNumber;
 
-              return (
-                <button
-                  key={day.dayNumber}
-                  type="button"
-                  onClick={() => {
-                    onSelectSection('itinerary');
-                    onSelectDayNumber(day.dayNumber);
-                  }}
-                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-colors cursor-pointer text-left ${
-                    isSelected
-                      ? 'bg-[#263B35] text-white font-medium'
-                      : 'text-[#475569] hover:bg-slate-50 hover:text-[#263B35]'
-                  }`}
-                >
-                  <div className="truncate">
-                    <span className="font-medium">{day.label}</span>
-                    <span className="text-[10px] opacity-70 ml-1.5">
-                      {day.formattedDate.split(',')[0]}
-                    </span>
-                  </div>
-                  {dayCount > 0 && (
-                    <span
-                      className={`text-[10px] tabular-nums font-mono px-1 py-0.2 rounded ${
+                  return (
+                    <button
+                      key={day.dayNumber}
+                      type="button"
+                      onClick={() => {
+                        onSelectSection('itinerary');
+                        onSelectDayNumber(day.dayNumber);
+                      }}
+                      className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-colors cursor-pointer text-left ${
                         isSelected
-                          ? 'text-white/80'
-                          : 'text-[#64748B]'
+                          ? 'bg-[#263B35] text-white font-medium'
+                          : 'text-[#475569] hover:bg-slate-50 hover:text-[#263B35]'
                       }`}
                     >
-                      {dayCount}
-                    </span>
-                  )}
+                      <div className="truncate">
+                        <span className="font-medium">{day.label}</span>
+                        <span className="text-[10px] opacity-70 ml-1.5">
+                          {day.formattedDate.split(',')[0]}
+                        </span>
+                      </div>
+                      {dayCount > 0 && (
+                        <span
+                          className={`text-[10px] tabular-nums font-mono px-1 py-0.2 rounded ${
+                            isSelected
+                              ? 'text-white/80'
+                              : 'text-[#64748B]'
+                          }`}
+                        >
+                          {dayCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="px-2 py-3 rounded-md border border-dashed border-[#E9E7E1] bg-[#F7F2E8]/40 text-center space-y-2">
+              <p className="text-[11px] text-[#64748B] leading-snug">
+                No hay ningún viaje seleccionado.
+              </p>
+              {onOpenCreateModal && (
+                <button
+                  type="button"
+                  onClick={onOpenCreateModal}
+                  className="w-full py-1.5 px-2 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-[11px] font-medium rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>Crear viaje</span>
                 </button>
-              );
-            })}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </aside>
     </>

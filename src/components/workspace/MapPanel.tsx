@@ -50,7 +50,8 @@ import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.t
 import { PlaceVideosSection } from '../common/PlaceVideosSection.tsx';
 
 interface MapPanelProps {
-  trip: TripItinerary;
+  trip: TripItinerary | null;
+  onOpenCreateModal?: () => void;
   places: Place[];
   selectedPlace: Place | null;
   onSelectPlace: (place: Place | null) => void;
@@ -86,6 +87,7 @@ const CATEGORY_STYLES: Record<string, { bg: string; icon: string; label: string 
 
 export const MapPanel: React.FC<MapPanelProps> = ({
   trip,
+  onOpenCreateModal,
   places,
   selectedPlace,
   onSelectPlace,
@@ -107,7 +109,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   searchQuery = '',
   onSearchChange,
 }) => {
-  const isItineraryMode = activeSection === 'itinerary';
+  const isItineraryMode = Boolean(trip && activeSection === 'itinerary');
   const categoryScrollRef = useRef<HTMLDivElement>(null);
   const categoryChipButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const dayTabsScrollRef = useRef<HTMLDivElement>(null);
@@ -153,10 +155,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   }, [selectedDayNumber, isItineraryMode]);
 
-  const destinationLocality: Locality | undefined = getLocality(trip.destinationId);
+  const destinationLocality: Locality | undefined = trip ? getLocality(trip.destinationId) : undefined;
   const centerLat = destinationLocality?.coordinates.lat || -8.1118;
   const centerLng = destinationLocality?.coordinates.lng || -79.0287;
-  const initialZoom = destinationLocality?.defaultZoom || 14;
+  const initialZoom = destinationLocality?.defaultZoom || (trip ? 14 : 12.5);
 
   const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -204,25 +206,27 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     setIsCardExpanded(false);
   }, [selectedPlace?.id]);
 
-  const savedIds = useMemo(() => new Set(trip.savedPlaceIds || []), [trip.savedPlaceIds]);
+  const savedIds = useMemo(() => new Set(trip?.savedPlaceIds || []), [trip?.savedPlaceIds]);
+  const tripActivities = useMemo(() => trip?.activities || [], [trip?.activities]);
 
   const dayItems: TripDayItem[] = useMemo(() => {
+    if (!trip) return [];
     return generateDayList(trip.startDate, trip.totalDays);
-  }, [trip.startDate, trip.totalDays]);
+  }, [trip?.startDate, trip?.totalDays]);
 
   // Sincronizar el día predeterminado al abrir el selector
   useEffect(() => {
-    if (quickDayPickerOpen && selectedPlace) {
+    if (quickDayPickerOpen && selectedPlace && trip) {
       if (selectedDayNumber && selectedDayNumber >= 1 && selectedDayNumber <= trip.totalDays) {
         setSelectedDayToAssign(selectedDayNumber);
       } else {
         const firstAvailable = dayItems.find(
-          (d) => !trip.activities.some((a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber)
+          (d) => !tripActivities.some((a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber)
         );
         setSelectedDayToAssign(firstAvailable ? firstAvailable.dayNumber : 1);
       }
     }
-  }, [quickDayPickerOpen, selectedPlace, selectedDayNumber, trip.totalDays, dayItems, trip.activities]);
+  }, [quickDayPickerOpen, selectedPlace, selectedDayNumber, trip, dayItems, tripActivities]);
 
   // Lugares filtrados reactivamente (categoría, búsqueda, localidad y filtros avanzados)
   const filteredPlaces = useMemo(() => {
@@ -243,7 +247,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       }
 
       // 3. Filtros avanzados
-      if (onlySavedFilter && !savedIds.has(p.id)) {
+      if (trip && onlySavedFilter && !savedIds.has(p.id)) {
         return false;
       }
 
@@ -517,8 +521,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     async function updateItineraryRoutes() {
       if (!source) return;
 
-      if (!isItineraryMode) {
-        // En MODO EXPLORAR no se dibujan líneas de itinerario para mantener el mapa despejado
+      if (!isItineraryMode || !trip) {
+        // En MODO EXPLORAR o sin viaje activo no se dibujan líneas de itinerario para mantener el mapa despejado
         source.setData({
           type: 'FeatureCollection',
           features: [],
@@ -541,7 +545,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
       if (selectedDayNumber) {
         // Modo Día individual: recorrido exclusivo de la jornada seleccionada
-        const dayActivities = trip.activities
+        const dayActivities = tripActivities
           .filter((a) => a.dayNumber === selectedDayNumber)
           .sort((a, b) => a.order - b.order);
 
@@ -615,7 +619,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         });
 
         for (const day of dayItems) {
-          const dayActivities = trip.activities
+          const dayActivities = tripActivities
             .filter((a) => a.dayNumber === day.dayNumber)
             .sort((a, b) => a.order - b.order);
 
@@ -675,7 +679,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [trip.activities, places, mapLoaded, showRoutes, selectedDayNumber, dayItems, isItineraryMode]);
+  }, [trip, tripActivities, places, mapLoaded, showRoutes, selectedDayNumber, dayItems, isItineraryMode]);
 
   // ==========================================
   // RENDERIZADO REACTIVO DE MARCADORES (FASE 3)
@@ -691,14 +695,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     const isSingleDayMode = selectedDayNumber !== null;
     const renderedPlaceIds = new Set<string>();
 
-    if (isItineraryMode) {
+    if (isItineraryMode && trip) {
       // ============================================================
       // 1. MODO PLANIFICAR (ITINERARIO)
       // Mostrar ÚNICAMENTE los establecimientos asignados al día seleccionado
       // (o a todas las jornadas si es "Todos los días").
       // NO mostrar establecimientos del catálogo no programados para ese día.
       // ============================================================
-      const relevantActivities = trip.activities
+      const relevantActivities = tripActivities
         .filter((a) => (isSingleDayMode ? a.dayNumber === selectedDayNumber : true))
         .sort((a, b) => {
           if (a.dayNumber !== b.dayNumber) return a.dayNumber - b.dayNumber;
@@ -819,7 +823,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           label: 'Lugar',
         };
 
-        const inTrip = trip.activities.find((a) => a.placeId === place.id);
+        const inTrip = tripActivities.find((a) => a.placeId === place.id);
 
         const el = document.createElement('div');
         el.className = 'riymo-map-marker-hitbox';
@@ -1040,7 +1044,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     filteredPlaces,
     selectedPlace,
     savedIds,
-    trip.activities,
+    tripActivities,
     selectedDayNumber,
     onSelectPlace,
     mapLoaded,
@@ -1060,8 +1064,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     // Si hay un lugar seleccionado, el efecto de selectedPlace ya lo enfoca
     if (selectedPlace) return;
 
-    if (selectedDayNumber) {
-      const dayActivities = trip.activities.filter((a) => a.dayNumber === selectedDayNumber);
+    if (selectedDayNumber && trip) {
+      const dayActivities = tripActivities.filter((a) => a.dayNumber === selectedDayNumber);
       const coords: [number, number][] = [];
       dayActivities.forEach((act) => {
         const place = act.place || places.find((p) => p.id === act.placeId);
@@ -1081,9 +1085,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         coords.forEach((c) => bounds.extend(c));
         map.fitBounds(bounds, { padding: 70, maxZoom: 16, duration: 600 });
       }
-    } else if (selectedDayNumber === null && trip.activities.length > 0) {
+    } else if (selectedDayNumber === null && tripActivities.length > 0) {
       const coords: [number, number][] = [];
-      trip.activities.forEach((act) => {
+      tripActivities.forEach((act) => {
         const place = act.place || places.find((p) => p.id === act.placeId);
         if (place?.coordinates) {
           coords.push([place.coordinates.lng, place.coordinates.lat]);
@@ -1095,7 +1099,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         map.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 600 });
       }
     }
-  }, [selectedDayNumber, trip.activities, places, mapLoaded, selectedPlace]);
+  }, [selectedDayNumber, trip, tripActivities, places, mapLoaded, selectedPlace]);
 
   // Si hay un lugar seleccionado, asegurar que el mapa lo enfoque suavemente
   useEffect(() => {
@@ -1224,7 +1228,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   // Alternar (toggle) asignación de un lugar a un día específico con feedback visual
   const handleToggleDay = (place: Place, dayNumber: number) => {
-    const existingActivity = trip.activities.find(
+    if (!trip) return;
+    const existingActivity = tripActivities.find(
       (a) => a.placeId === place.id && a.dayNumber === dayNumber
     );
 
@@ -1241,8 +1246,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   const selectedPlaceActivities = useMemo(() => {
     if (!selectedPlace) return [];
-    return trip.activities.filter((a) => a.placeId === selectedPlace.id);
-  }, [selectedPlace, trip.activities]);
+    return tripActivities.filter((a) => a.placeId === selectedPlace.id);
+  }, [selectedPlace, tripActivities]);
 
   const selectedPlaceActivity = selectedPlaceActivities[0] || null;
 
@@ -1265,7 +1270,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <ChevronLeft className="w-4 h-4" />
           </button>
           <div className="[writing-mode:vertical-rl] text-xs font-semibold text-[#64748B] tracking-wider uppercase rotate-180">
-            Mapa de {trip.destinationName}
+            Mapa de {trip ? trip.destinationName : 'La Libertad'}
           </div>
           <div className="w-2.5 h-2.5 rounded-full bg-[#E85B49]" />
         </div>
@@ -1302,8 +1307,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         {/* BARRA SUPERIOR CONTEXTUAL: EXPLORAR VS PLANIFICAR            */}
         {/* ============================================================ */}
         <div className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 max-w-lg pointer-events-none">
-          {/* Selector de Modo Contextual: Explorar Catálogo vs Planificar Itinerario */}
-          {onSelectSection && (
+          {/* Selector de Modo Contextual: Explorar Catálogo vs Planificar Itinerario (solo con viaje activo) */}
+          {onSelectSection && trip && (
             <div className="flex items-center gap-1 bg-white/95 backdrop-blur-md p-1 rounded-2xl shadow-md border border-[#E2E8F0] pointer-events-auto self-start">
               <button
                 type="button"
@@ -1327,12 +1332,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 }`}
               >
                 <Calendar className={`w-3.5 h-3.5 ${isItineraryMode ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
-                <span>Planificar {trip.activities.length > 0 ? `(${trip.activities.length})` : ''}</span>
+                <span>Planificar {tripActivities.length > 0 ? `(${tripActivities.length})` : ''}</span>
               </button>
             </div>
           )}
 
-          {isItineraryMode ? (
+          {isItineraryMode && trip ? (
             /* ================= MODO PLANIFICAR (ITINERARIO POR DÍAS) ================= */
             <div className="flex flex-col gap-1.5 pointer-events-auto animate-in fade-in duration-150">
               {/* Carrusel Desplazable de Días del Itinerario con soporte táctil fluido, degradados y flechas en desktop */}
@@ -1364,13 +1369,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       selectedDayNumber === null ? 'bg-white/20 text-white' : 'bg-[#E2E8F0] text-[#475569]'
                     }`}
                   >
-                    {trip.activities.length}
+                    {tripActivities.length}
                   </span>
                 </button>
 
                 {/* Días individuales */}
                 {dayItems.map((day) => {
-                  const dayCount = trip.activities.filter((a) => a.dayNumber === day.dayNumber).length;
+                  const dayCount = tripActivities.filter((a) => a.dayNumber === day.dayNumber).length;
                   const isSelected = selectedDayNumber === day.dayNumber;
                   const dayColor = getDayColor(day.dayNumber);
 
@@ -1418,7 +1423,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     style={{ backgroundColor: getDayColor(selectedDayNumber).bg }}
                   />
                   <span>
-                    Día {selectedDayNumber}: {trip.activities.filter((a) => a.dayNumber === selectedDayNumber).length} actividades programadas
+                    Día {selectedDayNumber}: {tripActivities.filter((a) => a.dayNumber === selectedDayNumber).length} actividades programadas
                   </span>
                 </div>
               )}
@@ -1477,7 +1482,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     <div className="p-1 space-y-0.5">
                       {searchSuggestions.map((sug) => {
                         const style = CATEGORY_STYLES[sug.category];
-                        const inTrip = trip.activities.find((a) => a.placeId === sug.id);
+                        const inTrip = tripActivities.find((a) => a.placeId === sug.id);
                         return (
                           <div
                             key={sug.id}
@@ -1700,7 +1705,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         )}
 
         {/* Indicador de estado vacío en Modo Planificar */}
-        {isItineraryMode && selectedDayNumber && trip.activities.filter((a) => a.dayNumber === selectedDayNumber).length === 0 && mapLoaded && (
+        {isItineraryMode && trip && selectedDayNumber && tripActivities.filter((a) => a.dayNumber === selectedDayNumber).length === 0 && mapLoaded && (
           <div className="absolute top-36 left-1/2 -translate-x-1/2 z-10 pointer-events-auto animate-in fade-in duration-200 max-w-[92%] sm:max-w-sm">
             <div className="bg-white/95 backdrop-blur-md border border-[#E2E8F0] rounded-2xl p-4 shadow-lg text-center space-y-2">
               <span className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-500 font-bold text-xs">
@@ -1847,34 +1852,52 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     />
                   </div>
                   {/* Asignación directa a días del viaje con toggle */}
-                  <div className="pt-2.5 border-t border-[#E9E7E1] space-y-2">
-                    <span className="text-xs font-medium text-[#263B35] block">
-                      Organizar en el Itinerario:
-                    </span>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {dayItems.map((d) => {
-                        const inThisDay = trip.activities.some(
-                          (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                        );
-                        return (
-                          <button
-                            key={d.dayNumber}
-                            type="button"
-                            onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
-                            className={`p-2 rounded-md text-xs font-medium flex flex-col items-center justify-center transition-all cursor-pointer ${
-                              inThisDay
-                                ? 'bg-[#263B35] text-white shadow-2xs'
-                                : 'bg-[#F7F2E8] text-[#263B35] hover:bg-[#E85B49] hover:text-white border border-[#E9E7E1]'
-                            }`}
-                            title={inThisDay ? `Día ${d.dayNumber} asignado` : `Añadir a Día ${d.dayNumber}`}
-                          >
-                            <span>{inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}</span>
-                            <span className="text-[10px] opacity-75">{d.weekdayShort}</span>
-                          </button>
-                        );
-                      })}
+                  {trip ? (
+                    <div className="pt-2.5 border-t border-[#E9E7E1] space-y-2">
+                      <span className="text-xs font-medium text-[#263B35] block">
+                        Organizar en el Itinerario:
+                      </span>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {dayItems.map((d) => {
+                          const inThisDay = tripActivities.some(
+                            (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                          );
+                          return (
+                            <button
+                              key={d.dayNumber}
+                              type="button"
+                              onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                              className={`p-2 rounded-md text-xs font-medium flex flex-col items-center justify-center transition-all cursor-pointer ${
+                                inThisDay
+                                  ? 'bg-[#263B35] text-white shadow-2xs'
+                                  : 'bg-[#F7F2E8] text-[#263B35] hover:bg-[#E85B49] hover:text-white border border-[#E9E7E1]'
+                              }`}
+                              title={inThisDay ? `Día ${d.dayNumber} asignado` : `Añadir a Día ${d.dayNumber}`}
+                            >
+                              <span>{inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}</span>
+                              <span className="text-[10px] opacity-75">{d.weekdayShort}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="pt-2.5 border-t border-[#E9E7E1] flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-[#64748B]">
+                        Crea o selecciona un viaje para añadirlo a tu itinerario.
+                      </span>
+                      {onOpenCreateModal && (
+                        <button
+                          type="button"
+                          onClick={onOpenCreateModal}
+                          className="px-2.5 py-1.5 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-medium rounded-md transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Crear viaje</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {/* Botón para ver ficha completa en Plan */}
                   {onSwitchToContent && (
@@ -1959,61 +1982,79 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                   </div>
 
                   {/* Acciones directas sobre el lugar seleccionado */}
-                  <div className="flex items-center justify-between pt-2 border-t border-[#E9E7E1] text-xs">
-                    {/* Botón Guardar en Wishlist */}
-                    {onToggleSavePlace && (
-                      <button
-                        type="button"
-                        onClick={() => onToggleSavePlace(selectedPlace.id)}
-                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-all cursor-pointer ${
-                          isSelectedSaved
-                            ? 'bg-[#F7F2E8] border-[#D9B66F] text-[#263B35]'
-                            : 'bg-white border-[#E9E7E1] text-[#64748B] hover:text-[#263B35]'
-                        }`}
-                        title={isSelectedSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
-                      >
-                        <Bookmark
-                          className={`w-3.5 h-3.5 ${
-                            isSelectedSaved ? 'fill-[#D9B66F] text-[#D9B66F]' : ''
+                  {trip ? (
+                    <div className="flex items-center justify-between pt-2 border-t border-[#E9E7E1] text-xs">
+                      {/* Botón Guardar en Wishlist */}
+                      {onToggleSavePlace && (
+                        <button
+                          type="button"
+                          onClick={() => onToggleSavePlace(selectedPlace.id)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-all cursor-pointer ${
+                            isSelectedSaved
+                              ? 'bg-[#F7F2E8] border-[#D9B66F] text-[#263B35]'
+                              : 'bg-white border-[#E9E7E1] text-[#64748B] hover:text-[#263B35]'
                           }`}
-                        />
-                        <span>{isSelectedSaved ? 'Guardado' : 'Guardar'}</span>
-                      </button>
-                    )}
+                          title={isSelectedSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
+                        >
+                          <Bookmark
+                            className={`w-3.5 h-3.5 ${
+                              isSelectedSaved ? 'fill-[#D9B66F] text-[#D9B66F]' : ''
+                            }`}
+                          />
+                          <span>{isSelectedSaved ? 'Guardado' : 'Guardar'}</span>
+                        </button>
+                      )}
 
-                    {/* Botones de asignación de días */}
-                    <div className="flex-1 min-w-0 flex items-center gap-1 pl-2">
-                      <span className="text-[11px] text-[#64748B] shrink-0">Añadir a:</span>
-                      <HorizontalScrollContainer
-                        containerClassName="flex-1 min-w-0"
-                        className="gap-1 py-0.5"
-                        gradientTheme="white"
-                        arrowSize="sm"
-                        ariaLabel="Asignar lugar a día"
-                      >
-                        {dayItems.map((d) => {
-                          const inThisDay = trip.activities.some(
-                            (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                          );
-                          return (
-                            <button
-                              key={d.dayNumber}
-                              type="button"
-                              onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
-                              className={`px-2 py-1 text-xs rounded-md font-medium shrink-0 whitespace-nowrap transition-all cursor-pointer ${
-                                inThisDay
-                                  ? 'bg-[#263B35] text-white'
-                                  : 'bg-[#F7F2E8] text-[#263B35] hover:bg-[#E85B49] hover:text-white border border-[#E9E7E1]'
-                              }`}
-                              title={inThisDay ? `Día ${d.dayNumber} asignado` : `Añadir a Día ${d.dayNumber}`}
-                            >
-                              {inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
-                            </button>
-                          );
-                        })}
-                      </HorizontalScrollContainer>
+                      {/* Botones de asignación de días */}
+                      <div className="flex-1 min-w-0 flex items-center gap-1 pl-2">
+                        <span className="text-[11px] text-[#64748B] shrink-0">Añadir a:</span>
+                        <HorizontalScrollContainer
+                          containerClassName="flex-1 min-w-0"
+                          className="gap-1 py-0.5"
+                          gradientTheme="white"
+                          arrowSize="sm"
+                          ariaLabel="Asignar lugar a día"
+                        >
+                          {dayItems.map((d) => {
+                            const inThisDay = tripActivities.some(
+                              (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                            );
+                            return (
+                              <button
+                                key={d.dayNumber}
+                                type="button"
+                                onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                                className={`px-2 py-1 text-xs rounded-md font-medium shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                                  inThisDay
+                                    ? 'bg-[#263B35] text-white'
+                                    : 'bg-[#F7F2E8] text-[#263B35] hover:bg-[#E85B49] hover:text-white border border-[#E9E7E1]'
+                                }`}
+                                title={inThisDay ? `Día ${d.dayNumber} asignado` : `Añadir a Día ${d.dayNumber}`}
+                              >
+                                {inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
+                              </button>
+                            );
+                          })}
+                        </HorizontalScrollContainer>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E9E7E1] text-xs">
+                      <span className="text-[11px] text-[#64748B]">
+                        Crea un viaje para planificar este lugar
+                      </span>
+                      {onOpenCreateModal && (
+                        <button
+                          type="button"
+                          onClick={onOpenCreateModal}
+                          className="px-2.5 py-1 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-medium rounded-md transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Crear viaje</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2074,7 +2115,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             type="button"
             onClick={handleResetCenter}
             className="p-2 bg-white hover:bg-[#F7F2E8] text-[#263B35] rounded-md border border-[#E9E7E1] shadow-xs transition-colors cursor-pointer"
-            title={`Centrar en ${trip.destinationName}`}
+            title={`Centrar en ${trip ? trip.destinationName : 'La Libertad'}`}
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -2141,23 +2182,25 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 </div>
               </div>
 
-              {/* Solo Guardados */}
-              <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-[#17243A] block">
-                    Solo lugares guardados
-                  </span>
-                  <span className="text-[11px] text-[#64748B]">
-                    Muestra únicamente lugares en tu lista Por visitar
-                  </span>
+              {/* Solo Guardados (solo disponible cuando hay viaje activo) */}
+              {trip && (
+                <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-[#17243A] block">
+                      Solo lugares guardados
+                    </span>
+                    <span className="text-[11px] text-[#64748B]">
+                      Muestra únicamente lugares en tu lista Por visitar
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={onlySavedFilter}
+                    onChange={(e) => setOnlySavedFilter(e.target.checked)}
+                    className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
+                  />
                 </div>
-                <input
-                  type="checkbox"
-                  checked={onlySavedFilter}
-                  onChange={(e) => setOnlySavedFilter(e.target.checked)}
-                  className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
-                />
-              </div>
+              )}
 
               {/* Calificación mínima */}
               <div className="pt-2 border-t border-[#F1F5F9] space-y-1.5">
@@ -2236,7 +2279,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       {/* ============================================================ */}
       {/* BOTTOM SHEET SELECTOR DE DÍA (EXCLUSIVO MOBILE - md:hidden) */}
       {/* ============================================================ */}
-      {quickDayPickerOpen && selectedPlace && (
+      {quickDayPickerOpen && selectedPlace && trip && (
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex flex-col justify-end md:hidden animate-in fade-in duration-200"
           onClick={() => setQuickDayPickerOpen(false)}
@@ -2276,10 +2319,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2.5 max-h-[50dvh] overscroll-contain pb-4">
               {dayItems.map((d) => {
                 const isSelected = selectedDayToAssign === d.dayNumber;
-                const isAlreadyIn = trip.activities.some(
+                const isAlreadyIn = tripActivities.some(
                   (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
                 );
-                const dayActCount = trip.activities.filter(
+                const dayActCount = tripActivities.filter(
                   (a) => a.dayNumber === d.dayNumber
                 ).length;
 
@@ -2354,7 +2397,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             {/* Pie fijo con botón de confirmación y cancelación */}
             <div className="p-4 border-t border-[#F1F5F9] bg-white flex flex-col gap-2 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
               {(() => {
-                const isSelectedDayAlreadyIn = trip.activities.some(
+                const isSelectedDayAlreadyIn = tripActivities.some(
                   (a) => a.placeId === selectedPlace.id && a.dayNumber === selectedDayToAssign
                 );
 

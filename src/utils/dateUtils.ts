@@ -113,12 +113,105 @@ export function formatDateRange(startDateStr: string, endDateStr: string): strin
   return `${startDay} ${startMonth} ${startYear} – ${endDay} ${endMonth} ${endYear}`;
 }
 
+export const DEFAULT_FLEXIBLE_DAYS = 3;
+
+export interface OptionalTripDatesResult extends TripDurationResult {
+  hasDates: boolean;
+  startDate: string;
+  endDate: string;
+}
+
+/**
+ * Validates optional start/end trip dates.
+ * - Both empty: valid flexible trip with DEFAULT_FLEXIBLE_DAYS (no calendar dates assigned).
+ * - Only startDate provided: valid single-day trip (endDate = startDate).
+ * - Only endDate provided: invalid (asks for startDate or leaving both empty).
+ * - Both provided: validates via calculateTripDuration.
+ */
+export function calculateOptionalTripDates(
+  startDateStr?: string,
+  endDateStr?: string
+): OptionalTripDatesResult {
+  const start = (startDateStr || '').trim();
+  const end = (endDateStr || '').trim();
+
+  if (!start && !end) {
+    return {
+      days: DEFAULT_FLEXIBLE_DAYS,
+      nights: DEFAULT_FLEXIBLE_DAYS - 1,
+      hasDates: false,
+      startDate: '',
+      endDate: '',
+      isValid: true,
+    };
+  }
+
+  if (start && !end) {
+    const startParts = parseDateParts(start);
+    if (!startParts || !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+      return {
+        days: 0,
+        nights: 0,
+        hasDates: false,
+        startDate: start,
+        endDate: '',
+        isValid: false,
+        error: 'Formato de fecha inválido',
+      };
+    }
+    return {
+      days: 1,
+      nights: 0,
+      hasDates: true,
+      startDate: start,
+      endDate: start,
+      isValid: true,
+    };
+  }
+
+  if (!start && end) {
+    return {
+      days: 0,
+      nights: 0,
+      hasDates: false,
+      startDate: '',
+      endDate: end,
+      isValid: false,
+      error: 'Ingresa también la fecha de inicio o deja ambas fechas vacías',
+    };
+  }
+
+  const duration = calculateTripDuration(start, end);
+  return {
+    ...duration,
+    hasDates: duration.isValid,
+    startDate: start,
+    endDate: end,
+  };
+}
+
 /**
  * Generates an array of day descriptors for the itinerary organizer.
  * Strictly timezone-safe using UTC arithmetic.
+ * When startDateStr is empty, returns flexible day labels ("Día 1", "Día 2", ...).
  */
 export function generateDayList(startDateStr: string, daysCount: number): TripDayItem[] {
-  if (!startDateStr || daysCount <= 0) return [];
+  if (daysCount <= 0) return [];
+
+  if (!startDateStr) {
+    const flexibleDays: TripDayItem[] = [];
+    for (let i = 0; i < daysCount; i++) {
+      flexibleDays.push({
+        dayNumber: i + 1,
+        dateString: '',
+        label: `Día ${i + 1}`,
+        formattedDate: 'Fecha flexible',
+        weekdayShort: '',
+      });
+    }
+    return flexibleDays;
+  }
+
   const startParts = parseDateParts(startDateStr);
   if (!startParts) return [];
 

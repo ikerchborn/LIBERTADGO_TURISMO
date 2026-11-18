@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MapPin, Calendar, ArrowRight, X, AlertCircle, Check } from 'lucide-react';
 import { LA_LIBERTAD_LOCALITIES } from '../types/geo.ts';
-import { calculateTripDuration, formatDateRange } from '../utils/dateUtils.ts';
+import { calculateOptionalTripDates, formatDateRange } from '../utils/dateUtils.ts';
 import { TripItinerary } from '../types/catalog.ts';
 
 interface CreateTripModalProps {
@@ -21,22 +21,23 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const defaultDates = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    const end = new Date(d);
-    end.setDate(end.getDate() + 4);
-    return {
-      start: d.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
-  }, []);
-
-  const [startDate, setStartDate] = useState<string>(defaultDates.start);
-  const [endDate, setEndDate] = useState<string>(defaultDates.end);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   const [tripName, setTripName] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedDestinationId(initialDestinationId || 'trujillo');
+      setStartDate('');
+      setEndDate('');
+      setTripName('');
+      setErrorMsg(null);
+      setIsDropdownOpen(false);
+      setSearchQuery('');
+    }
+  }, [isOpen, initialDestinationId]);
 
   const selectedLocality = useMemo(() => {
     return LA_LIBERTAD_LOCALITIES.find((l) => l.id === selectedDestinationId) || LA_LIBERTAD_LOCALITIES[0];
@@ -51,12 +52,13 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   }, [searchQuery]);
 
   const duration = useMemo(() => {
-    return calculateTripDuration(startDate, endDate);
+    return calculateOptionalTripDates(startDate, endDate);
   }, [startDate, endDate]);
 
   const dateRangeFormatted = useMemo(() => {
-    return formatDateRange(startDate, endDate);
-  }, [startDate, endDate]);
+    if (!duration.hasDates) return '';
+    return formatDateRange(duration.startDate, duration.endDate);
+  }, [duration]);
 
   if (!isOpen) return null;
 
@@ -74,8 +76,8 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
 
     const tripPayload = {
       destinationId: selectedLocality.id,
-      startDate,
-      endDate,
+      startDate: duration.startDate,
+      endDate: duration.endDate,
       title,
     };
 
@@ -106,8 +108,8 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
       title,
       destinationId: selectedLocality.id,
       destinationName: selectedLocality.name,
-      startDate,
-      endDate,
+      startDate: duration.startDate,
+      endDate: duration.endDate,
       totalDays: duration.days,
       totalNights: duration.nights,
       coverImage: selectedLocality.heroImage,
@@ -206,33 +208,37 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
             </div>
           </div>
 
-          {/* Fechas */}
+          {/* Fechas (opcionales) */}
           <div className="grid grid-cols-2 gap-2.5">
             <div>
               <label htmlFor="modal-start-date" className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
-                Llegada
+                Llegada <span className="text-[#64748B] font-normal lowercase">(opcional)</span>
               </label>
               <input
                 id="modal-start-date"
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setErrorMsg(null);
+                }}
                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md font-mono text-[#263B35] focus:outline-none focus:border-[#E85B49]"
-                required
               />
             </div>
             <div>
               <label htmlFor="modal-end-date" className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
-                Salida
+                Salida <span className="text-[#64748B] font-normal lowercase">(opcional)</span>
               </label>
               <input
                 id="modal-end-date"
                 type="date"
                 value={endDate}
-                min={startDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                min={startDate || undefined}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setErrorMsg(null);
+                }}
                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md font-mono text-[#263B35] focus:outline-none focus:border-[#E85B49]"
-                required
               />
             </div>
           </div>
@@ -241,7 +247,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#F7F2E8] rounded-md border border-[#E9E7E1] text-xs">
             <div className="flex items-center gap-1.5 text-[#263B35]">
               <Calendar className="w-3.5 h-3.5 text-[#64748B]" />
-              <span>{dateRangeFormatted}</span>
+              <span>{dateRangeFormatted || 'Fechas flexibles (opcionales)'}</span>
             </div>
             <span className="font-semibold text-[#263B35]">
               {duration.isValid ? `${duration.days} días` : '—'}

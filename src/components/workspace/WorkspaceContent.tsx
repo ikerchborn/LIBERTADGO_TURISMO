@@ -16,10 +16,11 @@ import {
   Compass,
   FileText,
   Info,
-  Check
+  Check,
+  ArrowRight
 } from 'lucide-react';
 import { Place, PlaceCategory, TripItinerary } from '../../types/catalog.ts';
-import { generateDayList, TripDayItem } from '../../utils/dateUtils.ts';
+import { generateDayList, formatDateRange, TripDayItem } from '../../utils/dateUtils.ts';
 import { WorkspaceSection } from './WorkspaceSidebar.tsx';
 import { PlaceImage } from '../common/PlaceImage.tsx';
 import {
@@ -37,7 +38,11 @@ import { TikTokRankingPanel } from './TikTokRankingPanel';
 
 
 interface WorkspaceContentProps {
-  trip: TripItinerary;
+  trip: TripItinerary | null;
+  savedTrips?: TripItinerary[];
+  onSelectSavedTrip?: (trip: TripItinerary) => void;
+  onOpenCreateModal?: () => void;
+  onClearActiveTrip?: () => void;
   places: Place[];
   selectedPlace: Place | null;
   onSelectPlace: (place: Place | null) => void;
@@ -67,6 +72,10 @@ interface WorkspaceContentProps {
 
 export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   trip,
+  savedTrips = [],
+  onSelectSavedTrip,
+  onOpenCreateModal,
+  onClearActiveTrip,
   places,
   selectedPlace,
   onSelectPlace,
@@ -113,7 +122,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
     }
-  }, [activeSection, trip.id]);
+  }, [activeSection, trip?.id]);
 
   // Mantener visible el filtro de categoría seleccionado al desplazarse
   useEffect(() => {
@@ -140,8 +149,9 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   }, [selectedLocality]);
 
   const dayItems: TripDayItem[] = useMemo(() => {
+    if (!trip) return [];
     return generateDayList(trip.startDate, trip.totalDays);
-  }, [trip.startDate, trip.totalDays]);
+  }, [trip?.startDate, trip?.totalDays]);
 
   // Opciones de localidad con conteos dinámicos en tiempo real
   const localityOptionsWithCounts = useMemo(() => {
@@ -161,11 +171,12 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
       return 'La Libertad';
     }
     const found = LOCALITY_FILTER_OPTIONS.find((l) => l.id === selectedLocality);
-    return found ? found.name : trip.destinationName;
-  }, [selectedLocality, trip.destinationName]);
+    return found ? found.name : trip?.destinationName || 'La Libertad';
+  }, [selectedLocality, trip?.destinationName]);
 
   // Alternar (toggle) asignación de un lugar a un día específico
   const handleToggleDay = (place: Place, dayNumber: number) => {
+    if (!trip) return;
     const existingActivity = trip.activities.find(
       (a) => a.placeId === place.id && a.dayNumber === dayNumber
     );
@@ -192,9 +203,10 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
   // Lugares guardados en la wishlist
   const savedPlaces = useMemo(() => {
+    if (!trip) return [];
     const savedIds = new Set(trip.savedPlaceIds || []);
     return places.filter((p) => savedIds.has(p.id));
-  }, [places, trip.savedPlaceIds]);
+  }, [places, trip]);
 
   const handleCreateManual = (e: React.FormEvent, dayNum: number) => {
     e.preventDefault();
@@ -220,9 +232,112 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   // ==========================================
 
   // ==========================================
-  // SECCIÓN 1: RESUMEN (PORTADA DEL VIAJE)
+  // SECCIÓN 1: RESUMEN (PORTADA DEL VIAJE / ESTADO VACÍO)
   // ==========================================
   if (activeSection === 'overview') {
+    if (!trip) {
+      return (
+        <div
+          ref={scrollContainerRef}
+          className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9E7E1] flex flex-col overflow-y-auto`}
+        >
+          <div className="p-5 sm:p-6 space-y-5 my-auto">
+            {/* Estado vacío inicial atractivo */}
+            <div className="rounded-xl border border-[#E9E7E1] bg-[#F7F2E8]/40 p-5 sm:p-6 space-y-4">
+              <div className="w-11 h-11 rounded-xl bg-white border border-[#E9E7E1] shadow-2xs flex items-center justify-center text-[#E85B49]">
+                <Compass className="w-5 h-5" />
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[#E85B49]">
+                  Espacio de viaje
+                </span>
+                <h2 className="text-lg sm:text-xl font-bold text-[#263B35] leading-snug">
+                  Planifica tu próximo viaje por La Libertad
+                </h2>
+                <p className="text-xs text-[#64748B] leading-relaxed">
+                  No hay ningún viaje seleccionado en este momento. Crea un nuevo itinerario o elige uno guardado para organizar tus días, rutas y lugares por visitar.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                {onOpenCreateModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenCreateModal}
+                    className="flex-1 py-2.5 px-4 bg-[#E85B49] hover:bg-[#D94C3C] active:scale-[0.99] text-white text-xs font-semibold rounded-md shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 stroke-[2.2]" />
+                    <span>Crear nuevo viaje</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => onSelectSection?.('explore')}
+                  className="py-2.5 px-3.5 bg-white hover:bg-[#F7F2E8] border border-[#E9E7E1] text-[#263B35] text-xs font-medium rounded-md transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Search className="w-3.5 h-3.5 text-[#64748B]" />
+                  <span>Explorar lugares</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Viajes guardados para selección manual */}
+            {savedTrips.length > 0 && onSelectSavedTrip ? (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-[#263B35]">
+                    Tus viajes guardados ({savedTrips.length})
+                  </h3>
+                  <span className="text-[11px] text-[#64748B]">
+                    Selecciona uno para continuar
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {savedTrips.map((savedTrip) => {
+                    const savedDateRange = formatDateRange(savedTrip.startDate, savedTrip.endDate);
+                    const activitiesCount = savedTrip.activities?.length || 0;
+
+                    return (
+                      <button
+                        key={savedTrip.id}
+                        type="button"
+                        onClick={() => onSelectSavedTrip(savedTrip)}
+                        className="w-full flex items-center justify-between gap-3 p-3 rounded-lg border border-[#E9E7E1] bg-white hover:border-[#263B35] hover:bg-[#F7F2E8]/40 transition-colors text-left cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-md bg-[#F7F2E8] border border-[#E9E7E1] flex items-center justify-center shrink-0 text-[#E85B49]">
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[#263B35] group-hover:text-[#E85B49] truncate transition-colors">
+                              {savedTrip.title}
+                            </p>
+                            <p className="text-[11px] text-[#64748B] truncate mt-0.5">
+                              {savedTrip.destinationName} · {savedDateRange || 'Fechas flexibles'} · {savedTrip.totalDays}{' '}
+                              {savedTrip.totalDays === 1 ? 'día' : 'días'}
+                              {activitiesCount > 0 ? ` · ${activitiesCount} act.` : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-[#64748B] group-hover:text-[#263B35] shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-[#E9E7E1] p-4 text-center text-xs text-[#64748B]">
+                Todavía no tienes viajes guardados. Cuando crees un itinerario aparecerá aquí para abrirlo cuando quieras.
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         ref={scrollContainerRef}
@@ -232,9 +347,20 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
           {/* Encabezado del destino */}
           <div className="space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#E85B49]">
-              Tu viaje
-            </span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[#E85B49]">
+                Tu viaje
+              </span>
+              {onClearActiveTrip && (
+                <button
+                  type="button"
+                  onClick={onClearActiveTrip}
+                  className="text-[11px] font-medium text-[#64748B] hover:text-[#263B35] hover:underline cursor-pointer"
+                >
+                  Cambiar viaje
+                </button>
+              )}
+            </div>
 
             <h2 className="text-xl font-bold text-[#263B35]">
               {trip.destinationName}
@@ -258,7 +384,7 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
               <div>
                 <p className="text-[10px] text-white/70">Llegada</p>
                 <p className="text-xs font-medium">
-                  {dayItems[0]?.formattedDate ?? 'Por definir'}
+                  {trip.startDate ? (dayItems[0]?.formattedDate ?? 'Por definir') : 'Por definir'}
                 </p>
               </div>
 
@@ -267,16 +393,20 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
               <div>
                 <p className="text-[10px] text-white/70">Salida</p>
                 <p className="text-xs font-medium">
-                  {dayItems[dayItems.length - 1]?.formattedDate ?? 'Por definir'}
+                  {trip.endDate ? (dayItems[dayItems.length - 1]?.formattedDate ?? 'Por definir') : 'Por definir'}
                 </p>
               </div>
 
               <div className="h-6 w-px bg-white/20" />
 
               <div>
-                <p className="text-[10px] text-white/70">Estancia</p>
+                <p className="text-[10px] text-white/70">
+                  {trip.startDate && trip.endDate ? 'Estancia' : 'Duración'}
+                </p>
                 <p className="text-xs font-medium">
-                  {trip.totalNights} noches
+                  {trip.startDate && trip.endDate
+                    ? `${trip.totalNights} noches`
+                    : `${trip.totalDays} días`}
                 </p>
               </div>
             </div>
@@ -583,59 +713,88 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
                 </div>
 
                 {/* Acciones principales directas */}
-                <div className="pt-3 border-t border-[#E9E7E1] flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onToggleSavePlace(selectedPlace.id)}
-                    className="px-3 py-1.5 border border-[#E9E7E1] rounded-md text-xs text-[#263B35] hover:bg-slate-50 transition-colors flex items-center gap-1.5 cursor-pointer"
-                    title={
-                      trip.savedPlaceIds?.includes(selectedPlace.id)
-                        ? 'Quitar de lugares para visitar'
-                        : 'Guardar en Por visitar'
-                    }
-                  >
-                    <Bookmark
-                      className={`w-3.5 h-3.5 ${
+                {trip ? (
+                  <div className="pt-3 border-t border-[#E9E7E1] flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onToggleSavePlace(selectedPlace.id)}
+                      className="px-3 py-1.5 border border-[#E9E7E1] rounded-md text-xs text-[#263B35] hover:bg-slate-50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                      title={
                         trip.savedPlaceIds?.includes(selectedPlace.id)
-                          ? 'fill-[#D9B66F] text-[#D9B66F]'
-                          : 'text-[#64748B]'
-                      }`}
-                    />
-                    <span>{trip.savedPlaceIds?.includes(selectedPlace.id) ? 'Guardado' : 'Guardar'}</span>
-                  </button>
-
-                  <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                    <span className="text-xs text-[#64748B] shrink-0 font-medium">Asignar al día:</span>
-                    <HorizontalScrollContainer
-                      containerClassName="flex-1 min-w-0"
-                      className="gap-1 py-0.5"
-                      gradientTheme="slate"
-                      arrowSize="sm"
-                      ariaLabel="Asignar lugar a día"
+                          ? 'Quitar de lugares para visitar'
+                          : 'Guardar en Por visitar'
+                      }
                     >
-                      {dayItems.map((d) => {
-                        const isAlreadyInDay = trip.activities.some(
-                          (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                        );
-                        return (
-                          <button
-                            key={d.dayNumber}
-                            type="button"
-                            onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
-                            className={`px-2.5 py-1 text-xs rounded-md font-mono font-medium shrink-0 flex-shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
-                              isAlreadyInDay
-                                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                : 'bg-[#263B35] text-white hover:bg-[#E85B49]'
-                            }`}
-                            title={isAlreadyInDay ? `Día ${d.dayNumber} asignado (Pulsar para quitar)` : `Asignar al Día ${d.dayNumber}`}
-                          >
-                            {isAlreadyInDay ? `✓ D${d.dayNumber}` : `D${d.dayNumber}`}
-                          </button>
-                        );
-                      })}
-                    </HorizontalScrollContainer>
+                      <Bookmark
+                        className={`w-3.5 h-3.5 ${
+                          trip.savedPlaceIds?.includes(selectedPlace.id)
+                            ? 'fill-[#D9B66F] text-[#D9B66F]'
+                            : 'text-[#64748B]'
+                        }`}
+                      />
+                      <span>{trip.savedPlaceIds?.includes(selectedPlace.id) ? 'Guardado' : 'Guardar'}</span>
+                    </button>
+
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                      <span className="text-xs text-[#64748B] shrink-0 font-medium">Asignar al día:</span>
+                      <HorizontalScrollContainer
+                        containerClassName="flex-1 min-w-0"
+                        className="gap-1 py-0.5"
+                        gradientTheme="slate"
+                        arrowSize="sm"
+                        ariaLabel="Asignar lugar a día"
+                      >
+                        {dayItems.map((d) => {
+                          const isAlreadyInDay = trip.activities.some(
+                            (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                          );
+                          return (
+                            <button
+                              key={d.dayNumber}
+                              type="button"
+                              onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                              className={`px-2.5 py-1 text-xs rounded-md font-mono font-medium shrink-0 flex-shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                                isAlreadyInDay
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  : 'bg-[#263B35] text-white hover:bg-[#E85B49]'
+                              }`}
+                              title={isAlreadyInDay ? `Día ${d.dayNumber} asignado (Pulsar para quitar)` : `Asignar al Día ${d.dayNumber}`}
+                            >
+                              {isAlreadyInDay ? `✓ D${d.dayNumber}` : `D${d.dayNumber}`}
+                            </button>
+                          );
+                        })}
+                      </HorizontalScrollContainer>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="pt-3 border-t border-[#E9E7E1] flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#F7F2E8]/60 -mx-4 -mb-4 px-4 py-3 mt-2">
+                    <span className="text-[11px] text-[#64748B]">
+                      Crea o selecciona un viaje para guardar este lugar o añadirlo a un día.
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {savedTrips.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectSection?.('overview')}
+                          className="px-2.5 py-1.5 bg-white border border-[#E9E7E1] hover:bg-slate-50 text-[#263B35] text-xs font-medium rounded-md transition-colors cursor-pointer"
+                        >
+                          Elegir viaje
+                        </button>
+                      )}
+                      {onOpenCreateModal && (
+                        <button
+                          type="button"
+                          onClick={onOpenCreateModal}
+                          className="px-2.5 py-1.5 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Crear viaje</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             {/* Galería de videos reales del lugar seleccionado */}
@@ -652,8 +811,8 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
           <div className="flex-1 overflow-y-auto p-3 sm:p-4">
             <div className={`grid grid-cols-1 ${isMapCollapsed ? 'md:grid-cols-2 xl:grid-cols-3' : ''} gap-2.5`}>
               {filteredPlaces.map((place) => {
-                const isSaved = trip.savedPlaceIds?.includes(place.id);
-                const placeActivities = trip.activities.filter((a) => a.placeId === place.id);
+                const isSaved = trip ? trip.savedPlaceIds?.includes(place.id) : false;
+                const placeActivities = trip ? trip.activities.filter((a) => a.placeId === place.id) : [];
                 const isRealVerified = place.verification?.isVerified === true;
                 const categoryLabel = place.subcategory || place.category;
 
@@ -722,10 +881,28 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => onToggleSavePlace(place.id)}
+                            onClick={() => {
+                              if (!trip) {
+                                onOpenCreateModal?.();
+                                return;
+                              }
+                              onToggleSavePlace(place.id);
+                            }}
                             className="p-1 text-[#64748B] hover:text-[#263B35] rounded transition-colors cursor-pointer"
-                            title={isSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
-                            aria-label={isSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
+                            title={
+                              !trip
+                                ? 'Crea un viaje para guardar lugares'
+                                : isSaved
+                                ? 'Quitar de guardados'
+                                : 'Guardar en Por visitar'
+                            }
+                            aria-label={
+                              !trip
+                                ? 'Crea un viaje para guardar lugares'
+                                : isSaved
+                                ? 'Quitar de guardados'
+                                : 'Guardar en Por visitar'
+                            }
                           >
                             <Bookmark
                               className={`w-3.5 h-3.5 ${
@@ -784,6 +961,48 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   // SECCIÓN 3: ITINERARIO POR DÍAS (PHASE 3)
   // ==========================================
   if (activeSection === 'itinerary') {
+    if (!trip) {
+      return (
+        <div
+          ref={scrollContainerRef}
+          className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9E7E1] flex flex-col items-center justify-center p-6 text-center`}
+        >
+          <div className="max-w-sm space-y-3">
+            <div className="w-11 h-11 rounded-xl bg-[#F7F2E8] border border-[#E9E7E1] flex items-center justify-center mx-auto text-[#E85B49]">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <h2 className="text-base font-bold text-[#263B35]">
+              No hay un itinerario activo
+            </h2>
+            <p className="text-xs text-[#64748B] leading-relaxed">
+              Crea un nuevo viaje o selecciona uno guardado para organizar tus actividades día a día y ver la ruta en el mapa.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              {onOpenCreateModal && (
+                <button
+                  type="button"
+                  onClick={onOpenCreateModal}
+                  className="px-4 py-2 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Crear nuevo viaje</span>
+                </button>
+              )}
+              {savedTrips.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onSelectSection?.('overview')}
+                  className="px-3.5 py-2 bg-white hover:bg-[#F7F2E8] border border-[#E9E7E1] text-[#263B35] text-xs font-medium rounded-md transition-colors cursor-pointer"
+                >
+                  Ver viajes guardados ({savedTrips.length})
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         ref={scrollContainerRef}
@@ -813,6 +1032,48 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   // SECCIÓN 4: LUGARES PARA VISITAR (WISHLIST)
   // ==========================================
   if (activeSection === 'saved') {
+    if (!trip) {
+      return (
+        <div
+          ref={scrollContainerRef}
+          className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9E7E1] flex flex-col items-center justify-center p-6 text-center`}
+        >
+          <div className="max-w-sm space-y-3">
+            <div className="w-11 h-11 rounded-xl bg-[#F7F2E8] border border-[#E9E7E1] flex items-center justify-center mx-auto text-[#71958B]">
+              <Bookmark className="w-5 h-5" />
+            </div>
+            <h2 className="text-base font-bold text-[#263B35]">
+              Lugares para visitar
+            </h2>
+            <p className="text-xs text-[#64748B] leading-relaxed">
+              Crea o selecciona un viaje para guardar aquí tus lugares pendientes por visitar.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              {onOpenCreateModal && (
+                <button
+                  type="button"
+                  onClick={onOpenCreateModal}
+                  className="px-4 py-2 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Crear nuevo viaje</span>
+                </button>
+              )}
+              {savedTrips.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onSelectSection?.('overview')}
+                  className="px-3.5 py-2 bg-white hover:bg-[#F7F2E8] border border-[#E9E7E1] text-[#263B35] text-xs font-medium rounded-md transition-colors cursor-pointer"
+                >
+                  Ver viajes guardados ({savedTrips.length})
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         ref={scrollContainerRef}
@@ -905,6 +1166,48 @@ export const WorkspaceContent: React.FC<WorkspaceContentProps> = ({
   // ==========================================
   // SECCIÓN 5: NOTAS
   // ==========================================
+  if (!trip) {
+    return (
+      <div
+        ref={scrollContainerRef}
+        className={`${containerWidthClass} h-full min-h-0 bg-white border-r border-[#E9E7E1] flex flex-col items-center justify-center p-6 text-center`}
+      >
+        <div className="max-w-sm space-y-3">
+          <div className="w-11 h-11 rounded-xl bg-[#F7F2E8] border border-[#E9E7E1] flex items-center justify-center mx-auto text-[#263B35]">
+            <FileText className="w-5 h-5" />
+          </div>
+          <h2 className="text-base font-bold text-[#263B35]">
+            Notas y recordatorios
+          </h2>
+          <p className="text-xs text-[#64748B] leading-relaxed">
+            Crea o selecciona un viaje para guardar notas, contactos locales y números de reserva.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+            {onOpenCreateModal && (
+              <button
+                type="button"
+                onClick={onOpenCreateModal}
+                className="px-4 py-2 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Crear nuevo viaje</span>
+              </button>
+            )}
+            {savedTrips.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onSelectSection?.('overview')}
+                className="px-3.5 py-2 bg-white hover:bg-[#F7F2E8] border border-[#E9E7E1] text-[#263B35] text-xs font-medium rounded-md transition-colors cursor-pointer"
+              >
+                Ver viajes guardados ({savedTrips.length})
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={scrollContainerRef}

@@ -16,7 +16,8 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
+  register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -70,7 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fetchCurrentUser(token);
   }, [fetchCurrentUser]);
 
-  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string; user?: AuthUser }> => {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -87,12 +88,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const receivedToken = data.data.token;
-      const receivedUser = data.data.user;
+      const receivedUser: AuthUser = data.data.user;
 
       // Keep token in volatile React memory only for Bearer authorization header backwards compatibility
       setToken(receivedToken);
       setUser(receivedUser);
-      return { success: true };
+      return { success: true, user: receivedUser };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Error de conexión con el servidor',
+      };
+    }
+  };
+
+  const register = async (
+    name: string,
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string; user?: AuthUser }> => {
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'No se pudo crear la cuenta' };
+      }
+
+      const receivedToken = data.data.token;
+      const receivedUser: AuthUser = data.data.user;
+
+      setToken(receivedToken);
+      setUser(receivedUser);
+      return { success: true, user: receivedUser };
     } catch (err) {
       return {
         success: false,
@@ -134,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated,
         isAdmin,
         login,
+        register,
         logout,
         refreshUser,
       }}

@@ -373,9 +373,11 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                   style={{ backgroundColor: dayColor.bg }}
                 />
                 <span>{day.label}</span>
-                <span className="text-[10px] opacity-75">
-                  ({day.weekdayShort})
-                </span>
+                {day.weekdayShort && (
+                  <span className="text-[10px] opacity-75">
+                    ({day.weekdayShort})
+                  </span>
+                )}
                 <span
                   className={`text-[10px] font-mono px-1.5 py-0.2 rounded leading-none ${
                     isSelected
