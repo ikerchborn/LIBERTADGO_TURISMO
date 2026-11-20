@@ -3,7 +3,7 @@ import { INITIAL_CAMPAIGNS } from '../data/initialCampaigns.ts';
 import { Place, TripItinerary, TripActivity, LocalCampaign, CampaignSubmission } from '../types/catalog.ts';
 import { LA_LIBERTAD_LOCALITIES, Locality } from '../types/geo.ts';
 import { isWithinLaLibertad, validateLocalityId, getLocality } from '../utils/geoBoundary.ts';
-import { calculateTripDuration, formatDateRange } from '../utils/dateUtils.ts';
+import { calculateOptionalTripDates } from '../utils/dateUtils.ts';
 import { getPlaceRepository } from './repositories/placeRepository.ts';
 
 class CatalogRepository {
@@ -54,8 +54,8 @@ class CatalogRepository {
   // --- ITINERARIES ---
   public createItinerary(params: {
     destinationId: string;
-    startDate: string;
-    endDate: string;
+    startDate?: string;
+    endDate?: string;
     title?: string;
   }): { itinerary?: TripItinerary; error?: string } {
     if (!validateLocalityId(params.destinationId)) {
@@ -67,7 +67,7 @@ class CatalogRepository {
       return { error: 'Destino no encontrado en el catálogo de La Libertad' };
     }
 
-    const duration = calculateTripDuration(params.startDate, params.endDate);
+    const duration = calculateOptionalTripDates(params.startDate, params.endDate);
     if (!duration.isValid) {
       return { error: duration.error || 'Fechas de viaje inválidas' };
     }
@@ -80,8 +80,8 @@ class CatalogRepository {
       title,
       destinationId: locality.id,
       destinationName: locality.name,
-      startDate: params.startDate,
-      endDate: params.endDate,
+      startDate: duration.startDate,
+      endDate: duration.endDate,
       totalDays: duration.days,
       totalNights: duration.nights,
       coverImage: locality.heroImage,

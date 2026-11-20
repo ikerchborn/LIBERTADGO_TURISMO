@@ -3,9 +3,9 @@
  * Main Application Component: Coordinated SaaS Workspace inspired by Wanderlog.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header.tsx';
-import { TripCreationScreen } from './components/TripCreationScreen.tsx';
+import { TripCreationScreen, PublicTopHeader } from './components/TripCreationScreen.tsx';
 import { CreateTripModal } from './components/CreateTripModal.tsx';
 import { ArchitectureModal } from './components/ArchitectureModal.tsx';
 import { DestinationsGallery } from './components/DestinationsGallery.tsx';
@@ -21,28 +21,40 @@ import {
   reorderDayActivities,
   moveActivityToDayAndIndex,
 } from './utils/itineraryUtils.ts';
+import {
+  getInitialActiveTrip,
+  loadSavedTripsFromStorage,
+  persistSavedTripsToStorage,
+  clearLegacyActiveTripStorage,
+  resolveSessionResetOnAuthChange,
+} from './utils/tripSessionUtils.ts';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { LoginPage } from './pages/LoginPage.tsx';
 import { AdminLayout } from './components/admin/AdminLayout.tsx';
 
-const STORAGE_TRIPS_KEY = 'libertadgo_trips_v2';
-const STORAGE_ACTIVE_ID_KEY = 'libertadgo_active_trip_id_v2';
-
 function MainAppContent() {
-  const { isAdmin, isAuthenticated, isLoading: isAuthLoading } = useAuth();
-  const [currentRoute, setCurrentRoute] = useState<'public' | 'admin' | 'login'>(() => {
+  const { user, isAdmin, isLoading: isAuthLoading } = useAuth();
+  const [currentRoute, setCurrentRoute] = useState<'public' | 'admin' | 'login' | 'register'>(() => {
     if (typeof window !== 'undefined') {
       const path = window.location.pathname;
       if (path.startsWith('/admin')) return 'admin';
+      if (path.startsWith('/register')) return 'register';
       if (path.startsWith('/login')) return 'login';
     }
     return 'public';
   });
 
-  const navigateTo = (route: 'public' | 'admin' | 'login') => {
+  const navigateTo = (route: 'public' | 'admin' | 'login' | 'register') => {
     setCurrentRoute(route);
     if (typeof window !== 'undefined') {
-      const path = route === 'admin' ? '/admin' : route === 'login' ? '/login' : '/';
+      const path =
+        route === 'admin'
+          ? '/admin'
+          : route === 'register'
+          ? '/register'
+          : route === 'login'
+          ? '/login'
+          : '/';
       window.history.pushState(null, '', path);
     }
   };
@@ -51,6 +63,7 @@ function MainAppContent() {
     const handlePopState = () => {
       const path = window.location.pathname;
       if (path.startsWith('/admin')) setCurrentRoute('admin');
+      else if (path.startsWith('/register')) setCurrentRoute('register');
       else if (path.startsWith('/login')) setCurrentRoute('login');
       else setCurrentRoute('public');
     };
@@ -62,6 +75,7 @@ function MainAppContent() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
   const [isArchitectureModalOpen, setIsArchitectureModalOpen] = useState<boolean>(false);
   const [modalTargetDestinationId, setModalTargetDestinationId] = useState<string>('trujillo');
+  const [prefillDestinationId, setPrefillDestinationId] = useState<string | null>(null);
 
   // Wanderlog Workspace State
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('overview');
@@ -127,49 +141,49 @@ function MainAppContent() {
     }
   };
 
-  // Trips persistence state
-  const [savedTrips, setSavedTrips] = useState<TripItinerary[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_TRIPS_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+  // Saved trips persistence state (never auto-seeded with example trip)
+  const [savedTrips, setSavedTrips] = useState<TripItinerary[]>(() =>
+    loadSavedTripsFromStorage(typeof window !== 'undefined' ? window.localStorage : null)
+  );
 
-  // Current active trip
-  const [currentTrip, setCurrentTrip] = useState<TripItinerary | null>(() => {
-    try {
-      const activeId = localStorage.getItem(STORAGE_ACTIVE_ID_KEY);
-      const stored = localStorage.getItem(STORAGE_TRIPS_KEY);
-      if (activeId && stored) {
-        const parsed: TripItinerary[] = JSON.parse(stored);
-        const match = parsed.find((t) => t.id === activeId);
-        if (match) return match;
-      }
-    } catch {
-      // ignore
-    }
-    return null;
-  });
+  // Current active trip - always starts empty (null) on load/reload/new session
+  const [currentTrip, setCurrentTrip] = useState<TripItinerary | null>(() => getInitialActiveTrip());
 
-  // Persist trips to localStorage
+  // Clean up any legacy active-trip pointer on mount
   useEffect(() => {
-    try {
-      if (savedTrips.length > 0) {
-        localStorage.setItem(STORAGE_TRIPS_KEY, JSON.stringify(savedTrips));
-      }
-      if (currentTrip) {
-        localStorage.setItem(STORAGE_ACTIVE_ID_KEY, currentTrip.id);
-      }
-    } catch {
-      // ignore
+    clearLegacyActiveTripStorage(typeof window !== 'undefined' ? window.localStorage : null);
+  }, []);
+
+  // Persist user-saved trips without storing an active trip pointer
+  useEffect(() => {
+    persistSavedTripsToStorage(
+      typeof window !== 'undefined' ? window.localStorage : null,
+      savedTrips
+    );
+  }, [savedTrips]);
+
+  // Reset workspace to empty state when logging out or starting a new auth session
+  const prevUserIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const decision = resolveSessionResetOnAuthChange(
+      prevUserIdRef.current,
+      user?.id ?? null,
+      isAuthLoading
+    );
+    prevUserIdRef.current = decision.nextPrevUserId;
+
+    if (decision.shouldResetWorkspace) {
+      setCurrentTrip(null);
+      setPrefillDestinationId(null);
+      setActiveView('workspace');
+      setSelectedPlace(null);
+      setSelectedDayNumber(null);
+      setActiveSection('overview');
+      setPreviousSection(null);
+      setMobileTab('content');
+      clearLegacyActiveTripStorage(typeof window !== 'undefined' ? window.localStorage : null);
     }
-  }, [savedTrips, currentTrip]);
+  }, [user?.id, isAuthLoading]);
 
   // Load full regional catalog (297 verified places across La Libertad)
   useEffect(() => {
@@ -193,6 +207,7 @@ function MainAppContent() {
   // ==========================================
   const handleTripCreated = (newTrip: TripItinerary) => {
     setCurrentTrip(newTrip);
+    setPrefillDestinationId(null);
     setSavedTrips((prev) => {
       const filtered = prev.filter((t) => t.id !== newTrip.id);
       return [newTrip, ...filtered];
@@ -219,6 +234,15 @@ function MainAppContent() {
     setSelectedLocality('todas');
     setSearchQuery('');
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  };
+
+  const handleClearActiveTrip = () => {
+    setCurrentTrip(null);
+    setActiveView('workspace');
+    setActiveSection('overview');
+    setPreviousSection(null);
+    setSelectedPlace(null);
+    setSelectedDayNumber(null);
   };
 
   const handleUpdateTripTitle = (newTitle: string) => {
@@ -433,23 +457,67 @@ function MainAppContent() {
     }
     return (
       <LoginPage
+        portalType="admin"
         onBackToApp={() => navigateTo('public')}
         onLoginSuccess={() => navigateTo('admin')}
       />
     );
   }
 
-  if (currentRoute === 'login') {
+  if (currentRoute === 'login' || currentRoute === 'register') {
     return (
       <LoginPage
+        portalType="public"
+        initialMode={currentRoute === 'register' ? 'register' : 'login'}
+        onModeChange={(nextMode) => navigateTo(nextMode)}
         onBackToApp={() => navigateTo('public')}
-        onLoginSuccess={() => navigateTo(isAdmin ? 'admin' : 'public')}
+        onLoginSuccess={() => {
+          setActiveView('workspace');
+          navigateTo('public');
+        }}
       />
     );
   }
 
+  // ==========================================
+  // PANTALLA 1: CREAR UN NUEVO VIAJE (INDEPENDIENTE)
+  // Sin mapa, sin barra lateral, sin paneles del planificador
+  // ==========================================
+  if (!currentTrip) {
+    if (activeView === 'destinations') {
+      return (
+        <div className="min-h-dvh flex flex-col bg-white text-[#263B35] antialiased">
+          <PublicTopHeader
+            activeNav="destinations"
+            onNavigatePlan={() => setActiveView('workspace')}
+            onNavigateDestinations={() => setActiveView('destinations')}
+          />
+          <main className="flex-1 overflow-y-auto">
+            <DestinationsGallery
+              onSelectDestinationForTrip={(locId) => {
+                setPrefillDestinationId(locId);
+                setActiveView('workspace');
+              }}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    return (
+      <TripCreationScreen
+        onTripCreated={handleTripCreated}
+        initialDestinationId={prefillDestinationId}
+        onNavigateDestinations={() => setActiveView('destinations')}
+      />
+    );
+  }
+
+  // ==========================================
+  // PANTALLA 2: ESPACIO DE TRABAJO DEL PLANIFICADOR
+  // ==========================================
   return (
-    <div className="h-dvh flex flex-col overflow-hidden bg-[#F8F9FA] text-[#17243A] antialiased">
+    <div className="h-dvh flex flex-col overflow-hidden bg-[#F7F2E8]/40 text-[#263B35] antialiased">
       {/* 
         Single Unified Header Bar:
         Always visible, fixed height (h-14 shrink-0), consistent across all views.
@@ -494,15 +562,8 @@ function MainAppContent() {
               }}
             />
           </div>
-        ) : !currentTrip ? (
-          /* Flujo Inicial Simplificado de Creación de Viaje */
-          <TripCreationScreen
-            onTripCreated={handleTripCreated}
-            savedTrips={savedTrips}
-            onSelectSavedTrip={handleSelectSavedTrip}
-          />
         ) : (
-          /* Workspace: Sidebar + Contenido Central + Mapa Persistente */
+          /* Workspace: Sidebar + Contenido Central + Mapa Persistente (soporta currentTrip === null) */
           <div className="h-full flex-1 min-h-0 min-w-0 flex flex-col lg:flex-row overflow-hidden">
             {/* Contenedor de Planificación (Sidebar + Contenido Central) */}
             <div
@@ -522,11 +583,22 @@ function MainAppContent() {
                 selectedDayNumber={selectedDayNumber}
                 onSelectDayNumber={setSelectedDayNumber}
                 totalPlacesCount={places.length}
+                onOpenCreateModal={() => {
+                  setModalTargetDestinationId('trujillo');
+                  setIsCreateModalOpen(true);
+                }}
               />
 
               {/* Área central con el contenido de la sección activa */}
               <WorkspaceContent
                 trip={currentTrip}
+                savedTrips={savedTrips}
+                onSelectSavedTrip={handleSelectSavedTrip}
+                onOpenCreateModal={() => {
+                  setModalTargetDestinationId('trujillo');
+                  setIsCreateModalOpen(true);
+                }}
+                onClearActiveTrip={handleClearActiveTrip}
                 places={places}
                 selectedPlace={selectedPlace}
                 onSelectPlace={handleSelectPlace}
@@ -563,6 +635,10 @@ function MainAppContent() {
             >
               <MapPanel
                 trip={currentTrip}
+                onOpenCreateModal={() => {
+                  setModalTargetDestinationId('trujillo');
+                  setIsCreateModalOpen(true);
+                }}
                 places={places}
                 selectedPlace={selectedPlace}
                 onSelectPlace={handleSelectPlace}

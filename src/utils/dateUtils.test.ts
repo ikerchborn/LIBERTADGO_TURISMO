@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_FLEXIBLE_DAYS,
   calculateTripDuration,
+  calculateOptionalTripDates,
   formatDateRange,
   formatSingleDateShort,
   generateDayList,
@@ -35,12 +37,47 @@ test('calculateTripDuration rejects trips exceeding maximum limits', () => {
   assert.match(result.error || '', /no puede exceder/);
 });
 
+test('calculateOptionalTripDates allows creating a trip without dates (flexible horizon)', () => {
+  const result = calculateOptionalTripDates('', '');
+  assert.equal(result.isValid, true);
+  assert.equal(result.hasDates, false);
+  assert.equal(result.startDate, '');
+  assert.equal(result.endDate, '');
+  assert.equal(result.days, DEFAULT_FLEXIBLE_DAYS);
+});
+
+test('calculateOptionalTripDates handles single startDate and rejects orphan endDate', () => {
+  const singleStart = calculateOptionalTripDates('2026-11-03', '');
+  assert.equal(singleStart.isValid, true);
+  assert.equal(singleStart.hasDates, true);
+  assert.equal(singleStart.startDate, '2026-11-03');
+  assert.equal(singleStart.endDate, '2026-11-03');
+  assert.equal(singleStart.days, 1);
+  assert.equal(singleStart.nights, 0);
+
+  const orphanEnd = calculateOptionalTripDates('', '2026-11-07');
+  assert.equal(orphanEnd.isValid, false);
+  assert.match(orphanEnd.error || '', /fecha de inicio/);
+});
+
+test('calculateOptionalTripDates validates complete date ranges', () => {
+  const validRange = calculateOptionalTripDates('2026-11-03', '2026-11-07');
+  assert.equal(validRange.isValid, true);
+  assert.equal(validRange.hasDates, true);
+  assert.equal(validRange.days, 5);
+  assert.equal(validRange.nights, 4);
+
+  const invalidRange = calculateOptionalTripDates('2026-11-07', '2026-11-03');
+  assert.equal(invalidRange.isValid, false);
+});
+
 test('formatDateRange formats dates cleanly in Spanish', () => {
   const formatted = formatDateRange('2026-11-03', '2026-11-07');
   assert.equal(formatted, '3 – 7 nov. 2026');
+  assert.equal(formatDateRange('', ''), '');
 });
 
-test('generateDayList generates correct day items and labels', () => {
+test('generateDayList generates correct day items with and without startDate', () => {
   const days = generateDayList('2026-11-03', 3);
   assert.equal(days.length, 3);
   assert.equal(days[0].dayNumber, 1);
@@ -49,6 +86,12 @@ test('generateDayList generates correct day items and labels', () => {
   assert.equal(days[1].dateString, '2026-11-04');
   assert.equal(days[2].dayNumber, 3);
   assert.equal(days[2].dateString, '2026-11-05');
+
+  const flexibleDays = generateDayList('', 3);
+  assert.equal(flexibleDays.length, 3);
+  assert.equal(flexibleDays[0].label, 'Día 1');
+  assert.equal(flexibleDays[0].dateString, '');
+  assert.equal(flexibleDays[0].formattedDate, 'Fecha flexible');
 });
 
 test('formatSingleDateShort formats a single date in Spanish', () => {

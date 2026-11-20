@@ -54,9 +54,11 @@ import {
 import { getWalkingRoute } from '../../utils/transitGeo.ts';
 import { WorkspaceSection } from './WorkspaceSidebar.tsx';
 import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
+import { PlaceVideosSection } from '../common/PlaceVideosSection.tsx';
 
 interface MapPanelProps {
-  trip: TripItinerary;
+  trip: TripItinerary | null;
+  onOpenCreateModal?: () => void;
   places: Place[];
   selectedPlace: Place | null;
   onSelectPlace: (place: Place | null) => void;
@@ -79,19 +81,20 @@ interface MapPanelProps {
   onSearchChange?: (query: string) => void;
 }
 
-// Categorías del catálogo con iconos y colores representativos
+// Categorías del catálogo con iconos y colores de la paleta oficial RIYMO
 const CATEGORY_STYLES: Record<string, { bg: string; icon: string; label: string }> = {
-  restaurantes: { bg: '#D97706', icon: '🍴', label: 'Gastronomía' },
-  gastronomia: { bg: '#D97706', icon: '🍴', label: 'Gastronomía' },
-  arqueologia: { bg: '#9A3412', icon: '🏛️', label: 'Arqueología' },
-  playas: { bg: '#0284C7', icon: '🌊', label: 'Playas' },
-  museos: { bg: '#7C3AED', icon: '🎨', label: 'Museos' },
-  atractivos: { bg: '#059669', icon: '⭐', label: 'Atractivos' },
-  hoteles: { bg: '#4338CA', icon: '🏨', label: 'Hoteles' },
+  restaurantes: { bg: '#E85B49', icon: '🍴', label: 'Gastronomía' },
+  gastronomia: { bg: '#E85B49', icon: '🍴', label: 'Gastronomía' },
+  arqueologia: { bg: '#D9B66F', icon: '🏛️', label: 'Arqueología' },
+  playas: { bg: '#71958B', icon: '🌊', label: 'Playas' },
+  museos: { bg: '#263B35', icon: '🎨', label: 'Museos' },
+  atractivos: { bg: '#263B35', icon: '⭐', label: 'Atractivos' },
+  hoteles: { bg: '#17243A', icon: '🏨', label: 'Hoteles' },
 };
 
 export const MapPanel: React.FC<MapPanelProps> = ({
   trip,
+  onOpenCreateModal,
   places,
   selectedPlace,
   onSelectPlace,
@@ -113,7 +116,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   searchQuery = '',
   onSearchChange,
 }) => {
-  const isItineraryMode = activeSection === 'itinerary';
+  const isItineraryMode = Boolean(trip && activeSection === 'itinerary');
   const categoryScrollRef = useRef<HTMLDivElement>(null);
   const categoryChipButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const dayTabsScrollRef = useRef<HTMLDivElement>(null);
@@ -160,8 +163,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   }, [selectedDayNumber, isItineraryMode]);
 
+  const destinationLocality: Locality | undefined = trip ? getLocality(trip.destinationId) : undefined;
+  const centerLat = destinationLocality?.coordinates.lat || -8.1118;
+  const centerLng = destinationLocality?.coordinates.lng || -79.0287;
+  const initialZoom = destinationLocality?.defaultZoom || (trip ? 14 : 12.5);
+
   const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [currentZoom, setCurrentZoom] = useState<number>(initialZoom);
   const [showRoutes, setShowRoutes] = useState<boolean>(true);
   const [routeMode, setRouteMode] = useState<'driving' | 'transit'>('transit');
   const [transitSummary, setTransitSummary] = useState<{
@@ -211,30 +220,27 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     setIsCardExpanded(false);
   }, [selectedPlace?.id]);
 
-  const destinationLocality: Locality | undefined = getLocality(trip.destinationId);
-  const centerLat = destinationLocality?.coordinates.lat || -8.1118;
-  const centerLng = destinationLocality?.coordinates.lng || -79.0287;
-  const initialZoom = destinationLocality?.defaultZoom || 14;
-
-  const savedIds = useMemo(() => new Set(trip.savedPlaceIds || []), [trip.savedPlaceIds]);
+  const savedIds = useMemo(() => new Set(trip?.savedPlaceIds || []), [trip?.savedPlaceIds]);
+  const tripActivities = useMemo(() => trip?.activities || [], [trip?.activities]);
 
   const dayItems: TripDayItem[] = useMemo(() => {
+    if (!trip) return [];
     return generateDayList(trip.startDate, trip.totalDays);
-  }, [trip.startDate, trip.totalDays]);
+  }, [trip?.startDate, trip?.totalDays]);
 
   // Sincronizar el día predeterminado al abrir el selector
   useEffect(() => {
-    if (quickDayPickerOpen && selectedPlace) {
+    if (quickDayPickerOpen && selectedPlace && trip) {
       if (selectedDayNumber && selectedDayNumber >= 1 && selectedDayNumber <= trip.totalDays) {
         setSelectedDayToAssign(selectedDayNumber);
       } else {
         const firstAvailable = dayItems.find(
-          (d) => !trip.activities.some((a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber)
+          (d) => !tripActivities.some((a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber)
         );
         setSelectedDayToAssign(firstAvailable ? firstAvailable.dayNumber : 1);
       }
     }
-  }, [quickDayPickerOpen, selectedPlace, selectedDayNumber, trip.totalDays, dayItems, trip.activities]);
+  }, [quickDayPickerOpen, selectedPlace, selectedDayNumber, trip, dayItems, tripActivities]);
 
   // Lugares filtrados reactivamente (categoría, búsqueda, localidad y filtros avanzados)
   const filteredPlaces = useMemo(() => {
@@ -255,7 +261,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       }
 
       // 3. Filtros avanzados
-      if (onlySavedFilter && !savedIds.has(p.id)) {
+      if (trip && onlySavedFilter && !savedIds.has(p.id)) {
         return false;
       }
 
@@ -363,7 +369,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               ],
               tileSize: 256,
               attribution:
-                '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> | LibertadGO',
+                '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> | RIYMO',
             },
           },
           layers: [
@@ -401,6 +407,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         } else {
           lastCenterRef.current = [center.lng, center.lat];
         }
+      });
+
+      map.on('zoomend', () => {
+        setCurrentZoom(map.getZoom());
       });
 
       map.on('load', () => {
@@ -561,8 +571,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
       clearTransitStopMarkers();
 
-      if (!isItineraryMode) {
-        // En MODO EXPLORAR no se dibujan líneas de itinerario para mantener el mapa despejado
+      if (!isItineraryMode || !trip) {
+        // En MODO EXPLORAR o sin viaje activo no se dibujan líneas de itinerario para mantener el mapa despejado
         source.setData({
           type: 'FeatureCollection',
           features: [],
@@ -975,7 +985,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
       if (selectedDayNumber) {
         // Modo Día individual: recorrido exclusivo de la jornada seleccionada
-        const dayActivities = trip.activities
+        const dayActivities = tripActivities
           .filter((a) => a.dayNumber === selectedDayNumber)
           .sort((a, b) => a.order - b.order);
 
@@ -1049,7 +1059,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         });
 
         for (const day of dayItems) {
-          const dayActivities = trip.activities
+          const dayActivities = tripActivities
             .filter((a) => a.dayNumber === day.dayNumber)
             .sort((a, b) => a.order - b.order);
 
@@ -1110,7 +1120,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       isCancelled = true;
       clearTransitStopMarkers();
     };
-  }, [trip.activities, places, mapLoaded, showRoutes, selectedDayNumber, dayItems, isItineraryMode, routeMode]);
+  }, [trip, tripActivities, places, mapLoaded, showRoutes, selectedDayNumber, dayItems, isItineraryMode, routeMode]);
 
   // ==========================================
   // RENDERIZADO REACTIVO DE MARCADORES (FASE 3)
@@ -1126,14 +1136,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     const isSingleDayMode = selectedDayNumber !== null;
     const renderedPlaceIds = new Set<string>();
 
-    if (isItineraryMode) {
+    if (isItineraryMode && trip) {
       // ============================================================
       // 1. MODO PLANIFICAR (ITINERARIO)
       // Mostrar ÚNICAMENTE los establecimientos asignados al día seleccionado
       // (o a todas las jornadas si es "Todos los días").
       // NO mostrar establecimientos del catálogo no programados para ese día.
       // ============================================================
-      const relevantActivities = trip.activities
+      const relevantActivities = tripActivities
         .filter((a) => (isSingleDayMode ? a.dayNumber === selectedDayNumber : true))
         .sort((a, b) => {
           if (a.dayNumber !== b.dayNumber) return a.dayNumber - b.dayNumber;
@@ -1149,7 +1159,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         const dayColor = getDayColor(act.dayNumber);
 
         const el = document.createElement('div');
-        el.className = 'libertadgo-map-marker-hitbox';
+        el.className = 'riymo-map-marker-hitbox';
         el.style.width = '44px';
         el.style.height = '44px';
         el.style.display = 'flex';
@@ -1158,13 +1168,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         el.style.cursor = 'pointer';
         el.style.userSelect = 'none';
         el.style.pointerEvents = 'auto';
-        el.style.zIndex = isSelected ? '60' : '30';
+        el.style.zIndex = isSelected ? '20' : '10';
         el.setAttribute('role', 'button');
         el.setAttribute('tabindex', '0');
         el.setAttribute('aria-label', `${place.name} · Día ${act.dayNumber} · #${act.order}`);
 
         const inner = document.createElement('div');
-        inner.className = 'libertadgo-map-marker-badge';
+        inner.className = 'riymo-map-marker-badge';
         inner.style.transition = 'transform 160ms cubic-bezier(0.16, 1, 0.3, 1), filter 160ms ease';
         inner.style.display = 'flex';
         inner.style.alignItems = 'center';
@@ -1242,10 +1252,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     } else {
       // ============================================================
       // 2. MODO EXPLORAR (CATÁLOGO COMPLETO)
-      // Mostrar todos los lugares del catálogo que correspondan a los filtros activos
-      // Mantener buscador y categorías, y permitir añadir al itinerario.
+      // Agrupación visual inteligente (clustering) estilo Google Maps si hay alta densidad
       // ============================================================
-      filteredPlaces.forEach((place) => {
+      const renderSinglePlaceMarker = (place: Place) => {
         renderedPlaceIds.add(place.id);
         const isSelected = selectedPlace?.id === place.id;
         const isSaved = savedIds.has(place.id);
@@ -1255,11 +1264,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           label: 'Lugar',
         };
 
-        // Si ya está asignado en alguna jornada del viaje, mostrar indicador de día
-        const inTrip = trip.activities.find((a) => a.placeId === place.id);
+        const inTrip = tripActivities.find((a) => a.placeId === place.id);
 
         const el = document.createElement('div');
-        el.className = 'libertadgo-map-marker-hitbox';
+        el.className = 'riymo-map-marker-hitbox';
         el.style.width = '44px';
         el.style.height = '44px';
         el.style.display = 'flex';
@@ -1268,10 +1276,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         el.style.cursor = 'pointer';
         el.style.userSelect = 'none';
         el.style.pointerEvents = 'auto';
-        el.style.zIndex = isSelected ? '55' : '20';
+        el.style.zIndex = isSelected ? '20' : '10';
 
         const inner = document.createElement('div');
-        inner.className = 'libertadgo-map-marker-badge';
+        inner.className = 'riymo-map-marker-badge';
         inner.style.transition = 'transform 160ms cubic-bezier(0.16, 1, 0.3, 1), filter 160ms ease';
 
         if (isSaved) {
@@ -1343,13 +1351,141 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           .addTo(map);
 
         markersRef.current.push(marker);
-      });
+      };
+
+      const shouldCluster = currentZoom < 13.5 && filteredPlaces.length > 25;
+
+      if (shouldCluster) {
+        type PlaceCluster = {
+          places: Place[];
+          centerLng: number;
+          centerLat: number;
+          hasSaved: boolean;
+        };
+
+        const clusters: PlaceCluster[] = [];
+        const clusterDistanceDeg = currentZoom < 10 ? 0.08 : currentZoom < 12 ? 0.035 : 0.016;
+
+        filteredPlaces.forEach((place) => {
+          if (selectedPlace?.id === place.id) {
+            clusters.push({
+              places: [place],
+              centerLng: place.coordinates.lng,
+              centerLat: place.coordinates.lat,
+              hasSaved: savedIds.has(place.id),
+            });
+            return;
+          }
+
+          let added = false;
+          for (const c of clusters) {
+            if (c.places.some((p) => p.id === selectedPlace?.id)) continue;
+            const dist = Math.hypot(
+              place.coordinates.lng - c.centerLng,
+              place.coordinates.lat - c.centerLat
+            );
+            if (dist < clusterDistanceDeg) {
+              c.places.push(place);
+              if (savedIds.has(place.id)) c.hasSaved = true;
+              c.centerLng =
+                (c.centerLng * (c.places.length - 1) + place.coordinates.lng) / c.places.length;
+              c.centerLat =
+                (c.centerLat * (c.places.length - 1) + place.coordinates.lat) / c.places.length;
+              added = true;
+              break;
+            }
+          }
+
+          if (!added) {
+            clusters.push({
+              places: [place],
+              centerLng: place.coordinates.lng,
+              centerLat: place.coordinates.lat,
+              hasSaved: savedIds.has(place.id),
+            });
+          }
+        });
+
+        clusters.forEach((cluster) => {
+          if (cluster.places.length > 1) {
+            const clusterEl = document.createElement('div');
+            clusterEl.className = 'riymo-map-cluster-marker';
+            clusterEl.style.width = '38px';
+            clusterEl.style.height = '38px';
+            clusterEl.style.display = 'flex';
+            clusterEl.style.alignItems = 'center';
+            clusterEl.style.justifyContent = 'center';
+            clusterEl.style.cursor = 'pointer';
+            clusterEl.style.userSelect = 'none';
+            clusterEl.style.pointerEvents = 'auto';
+            clusterEl.style.zIndex = '15';
+            clusterEl.setAttribute('role', 'button');
+            clusterEl.setAttribute('aria-label', `${cluster.places.length} lugares en esta zona`);
+
+            clusterEl.innerHTML = `
+              <div style="
+                background: ${cluster.hasSaved ? '#17243A' : '#263B35'};
+                color: #FFFFFF;
+                min-width: 32px;
+                height: 32px;
+                padding: 0 6px;
+                border-radius: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                font-weight: 700;
+                font-family: Roboto, system-ui, sans-serif;
+                border: 2px solid ${cluster.hasSaved ? '#D9B66F' : '#FFFFFF'};
+                box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+                transition: transform 160ms ease;
+              " title="${cluster.places.length} lugares (Clic para acercar)">
+                ${cluster.places.length}
+              </div>
+            `;
+
+            clusterEl.addEventListener('mouseenter', () => {
+              const innerDiv = clusterEl.firstElementChild as HTMLElement;
+              if (innerDiv) innerDiv.style.transform = 'scale(1.15)';
+            });
+            clusterEl.addEventListener('mouseleave', () => {
+              const innerDiv = clusterEl.firstElementChild as HTMLElement;
+              if (innerDiv) innerDiv.style.transform = 'none';
+            });
+            clusterEl.addEventListener('click', (e) => {
+              e.stopPropagation();
+              map.flyTo({
+                center: [cluster.centerLng, cluster.centerLat],
+                zoom: Math.min(16, (map.getZoom() || currentZoom) + 2.5),
+                duration: 500,
+              });
+            });
+
+            const marker = new maplibregl.Marker({
+              element: clusterEl,
+              anchor: 'center',
+            })
+              .setLngLat([cluster.centerLng, cluster.centerLat])
+              .addTo(map);
+
+            markersRef.current.push(marker);
+            return;
+          }
+
+          const singlePlace = cluster.places[0];
+          renderSinglePlaceMarker(singlePlace);
+        });
+      } else {
+        filteredPlaces.forEach((place) => {
+          renderSinglePlaceMarker(place);
+        });
+      }
     }
   }, [
     filteredPlaces,
     selectedPlace,
     savedIds,
-    trip.activities,
+    tripActivities,
     selectedDayNumber,
     onSelectPlace,
     mapLoaded,
@@ -1358,6 +1494,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     onlySavedFilter,
     places,
     isItineraryMode,
+    currentZoom,
   ]);
 
   // Ajuste automático de encuadre en el mapa al cambiar de día
@@ -1368,8 +1505,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     // Si hay un lugar seleccionado, el efecto de selectedPlace ya lo enfoca
     if (selectedPlace) return;
 
-    if (selectedDayNumber) {
-      const dayActivities = trip.activities.filter((a) => a.dayNumber === selectedDayNumber);
+    if (selectedDayNumber && trip) {
+      const dayActivities = tripActivities.filter((a) => a.dayNumber === selectedDayNumber);
       const coords: [number, number][] = [];
       dayActivities.forEach((act) => {
         const place = act.place || places.find((p) => p.id === act.placeId);
@@ -1389,9 +1526,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         coords.forEach((c) => bounds.extend(c));
         map.fitBounds(bounds, { padding: 70, maxZoom: 16, duration: 600 });
       }
-    } else if (selectedDayNumber === null && trip.activities.length > 0) {
+    } else if (selectedDayNumber === null && tripActivities.length > 0) {
       const coords: [number, number][] = [];
-      trip.activities.forEach((act) => {
+      tripActivities.forEach((act) => {
         const place = act.place || places.find((p) => p.id === act.placeId);
         if (place?.coordinates) {
           coords.push([place.coordinates.lng, place.coordinates.lat]);
@@ -1403,7 +1540,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         map.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 600 });
       }
     }
-  }, [selectedDayNumber, trip.activities, places, mapLoaded, selectedPlace]);
+  }, [selectedDayNumber, trip, tripActivities, places, mapLoaded, selectedPlace]);
 
   // Si hay un lugar seleccionado, asegurar que el mapa lo enfoque suavemente
   useEffect(() => {
@@ -1438,7 +1575,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           }
 
           const el = document.createElement('div');
-          el.className = 'libertadgo-user-pulse-marker';
+          el.className = 'riymo-user-pulse-marker';
           el.innerHTML = `
             <div style="position: relative; width: 22px; height: 22px; pointer-events: none;">
               <div style="position: absolute; inset: -4px; border-radius: 50%; background: rgba(37, 99, 235, 0.35); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
@@ -1532,7 +1669,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   // Alternar (toggle) asignación de un lugar a un día específico con feedback visual
   const handleToggleDay = (place: Place, dayNumber: number) => {
-    const existingActivity = trip.activities.find(
+    if (!trip) return;
+    const existingActivity = tripActivities.find(
       (a) => a.placeId === place.id && a.dayNumber === dayNumber
     );
 
@@ -1549,8 +1687,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   const selectedPlaceActivities = useMemo(() => {
     if (!selectedPlace) return [];
-    return trip.activities.filter((a) => a.placeId === selectedPlace.id);
-  }, [selectedPlace, trip.activities]);
+    return tripActivities.filter((a) => a.placeId === selectedPlace.id);
+  }, [selectedPlace, tripActivities]);
 
   const selectedPlaceActivity = selectedPlaceActivities[0] || null;
 
@@ -1573,7 +1711,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <ChevronLeft className="w-4 h-4" />
           </button>
           <div className="[writing-mode:vertical-rl] text-xs font-semibold text-[#64748B] tracking-wider uppercase rotate-180">
-            Mapa de {trip.destinationName}
+            Mapa de {trip ? trip.destinationName : 'La Libertad'}
           </div>
           <div className="w-2.5 h-2.5 rounded-full bg-[#E85B49]" />
         </div>
@@ -1610,8 +1748,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         {/* BARRA SUPERIOR CONTEXTUAL: EXPLORAR VS PLANIFICAR            */}
         {/* ============================================================ */}
         <div className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 max-w-lg pointer-events-none">
-          {/* Selector de Modo Contextual: Explorar Catálogo vs Planificar Itinerario */}
-          {onSelectSection && (
+          {/* Selector de Modo Contextual: Explorar Catálogo vs Planificar Itinerario (solo con viaje activo) */}
+          {onSelectSection && trip && (
             <div className="flex items-center gap-1 bg-white/95 backdrop-blur-md p-1 rounded-2xl shadow-md border border-[#E2E8F0] pointer-events-auto self-start">
               <button
                 type="button"
@@ -1635,12 +1773,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 }`}
               >
                 <Calendar className={`w-3.5 h-3.5 ${isItineraryMode ? 'text-[#E85B49]' : 'text-[#64748B]'}`} />
-                <span>Planificar {trip.activities.length > 0 ? `(${trip.activities.length})` : ''}</span>
+                <span>Planificar {tripActivities.length > 0 ? `(${tripActivities.length})` : ''}</span>
               </button>
             </div>
           )}
 
-          {isItineraryMode ? (
+          {isItineraryMode && trip ? (
             /* ================= MODO PLANIFICAR (ITINERARIO POR DÍAS) ================= */
             <div className="flex flex-col gap-1.5 pointer-events-auto animate-in fade-in duration-150">
               {/* Carrusel Desplazable de Días del Itinerario con soporte táctil fluido, degradados y flechas en desktop */}
@@ -1672,13 +1810,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       selectedDayNumber === null ? 'bg-white/20 text-white' : 'bg-[#E2E8F0] text-[#475569]'
                     }`}
                   >
-                    {trip.activities.length}
+                    {tripActivities.length}
                   </span>
                 </button>
 
                 {/* Días individuales */}
                 {dayItems.map((day) => {
-                  const dayCount = trip.activities.filter((a) => a.dayNumber === day.dayNumber).length;
+                  const dayCount = tripActivities.filter((a) => a.dayNumber === day.dayNumber).length;
                   const isSelected = selectedDayNumber === day.dayNumber;
                   const dayColor = getDayColor(day.dayNumber);
 
@@ -1727,7 +1865,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       style={{ backgroundColor: getDayColor(selectedDayNumber).bg }}
                     />
                     <span>
-                      Día {selectedDayNumber}: {trip.activities.filter((a) => a.dayNumber === selectedDayNumber).length} act.
+                      Día {selectedDayNumber}: {tripActivities.filter((a) => a.dayNumber === selectedDayNumber).length} act.
                     </span>
                   </div>
                 )}
@@ -1827,58 +1965,58 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           ) : (
             /* ================= MODO EXPLORAR (CATÁLOGO COMPLETO) ================= */
             <>
-              {/* Barra de Búsqueda Flotante */}
+              {/* Barra de Búsqueda Flotante tipo Google Maps */}
               <div className="relative pointer-events-auto">
-                <div className="flex items-center bg-white rounded-2xl shadow-md border border-[#E2E8F0] px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-[#E85B49]/20 focus-within:border-[#E85B49]">
-                  <Search className="w-4 h-4 text-[#64748B] shrink-0 mr-2.5" />
+                <div className="flex items-center bg-white rounded-lg shadow-sm border border-[#E9E7E1] px-3 py-2 transition-all focus-within:border-[#263B35]">
+                  <Search className="w-4 h-4 text-[#64748B] shrink-0 mr-2" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => onSearchChange?.(e.target.value)}
                     onFocus={() => setIsSearchFocused(true)}
                     placeholder="Buscar restaurantes, playas, museos..."
-                    className="w-full text-xs sm:text-sm text-[#17243A] placeholder:text-[#94A3B8] bg-transparent outline-none"
+                    className="w-full text-xs text-[#263B35] placeholder:text-[#94A3B8] bg-transparent outline-none"
                   />
 
                   {searchQuery && (
                     <button
                       type="button"
                       onClick={() => onSearchChange?.('')}
-                      className="p-1 text-[#94A3B8] hover:text-[#17243A] cursor-pointer"
+                      className="p-1 text-[#94A3B8] hover:text-[#263B35] cursor-pointer"
                       title="Limpiar búsqueda"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
 
-                  <div className="h-4 w-px bg-[#E2E8F0] mx-2" />
+                  <div className="h-4 w-px bg-[#E9E7E1] mx-1.5" />
 
-                  {/* Botón de Filtros Avanzados (Sliders) */}
+                  {/* Botón de Filtros Avanzados */}
                   <button
                     type="button"
                     onClick={() => setIsAdvancedFiltersOpen(true)}
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer relative ${
+                    className={`p-1 rounded-md transition-colors cursor-pointer relative ${
                       onlySavedFilter || minRatingFilter > 0 || onlyMinceturFilter
                         ? 'bg-[#E85B49] text-white'
-                        : 'text-[#64748B] hover:text-[#17243A] hover:bg-[#F1F5F9]'
+                        : 'text-[#64748B] hover:text-[#263B35] hover:bg-[#F7F2E8]'
                     }`}
                     title="Filtros avanzados"
                     aria-label="Filtros avanzados"
                   >
-                    <SlidersHorizontal className="w-4 h-4" />
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
                     {(onlySavedFilter || minRatingFilter > 0 || onlyMinceturFilter) && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#17243A] border-2 border-white" />
+                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#263B35] border border-white" />
                     )}
                   </button>
                 </div>
 
                 {/* Menú de Sugerencias en tiempo real */}
                 {searchSuggestions.length > 0 && isSearchFocused && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-[#E2E8F0] overflow-hidden z-30 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="p-1.5 space-y-0.5">
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-md border border-[#E9E7E1] overflow-hidden z-30 animate-in fade-in duration-100">
+                    <div className="p-1 space-y-0.5">
                       {searchSuggestions.map((sug) => {
                         const style = CATEGORY_STYLES[sug.category];
-                        const inTrip = trip.activities.find((a) => a.placeId === sug.id);
+                        const inTrip = tripActivities.find((a) => a.placeId === sug.id);
                         return (
                           <div
                             key={sug.id}
@@ -1892,12 +2030,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                                 duration: 700,
                               });
                             }}
-                            className="flex items-center justify-between p-2 rounded-lg hover:bg-[#F8FAFC] cursor-pointer transition-colors"
+                            className="flex items-center justify-between p-2 rounded-md hover:bg-[#F7F2E8] cursor-pointer transition-colors"
                           >
-                            <div className="flex items-center gap-2.5 truncate">
-                              <span className="text-sm shrink-0">{style?.icon || '📍'}</span>
+                            <div className="flex items-center gap-2 truncate">
+                              <span className="text-xs shrink-0">{style?.icon || '📍'}</span>
                               <div className="truncate">
-                                <span className="text-xs font-bold text-[#17243A] block truncate">
+                                <span className="text-xs font-semibold text-[#263B35] block truncate">
                                   {sug.name}
                                 </span>
                                 <span className="text-[11px] text-[#64748B] block truncate">
@@ -1907,7 +2045,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                             </div>
 
                             {inTrip && (
-                              <span className="text-[10px] font-semibold text-white bg-[#E85B49] px-1.5 py-0.5 rounded shrink-0 ml-2">
+                              <span className="text-[10px] font-medium text-white bg-[#E85B49] px-1.5 py-0.5 rounded shrink-0 ml-2">
                                 Día {inTrip.dayNumber}
                               </span>
                             )}
@@ -1919,7 +2057,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 )}
               </div>
 
-              {/* Carrusel Desplazable de Filtros por Localidad en el mapa */}
+              {/* Filtros por Localidad en el mapa */}
               {onLocalityChange && (
                 <HorizontalScrollContainer
                   containerClassName="w-full pointer-events-auto"
@@ -1935,14 +2073,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                         key={loc.id}
                         type="button"
                         onClick={() => onLocalityChange?.(loc.id)}
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 flex-shrink-0 shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap shrink-0 flex-shrink-0 transition-colors cursor-pointer flex items-center gap-1 border ${
                           isLocActive
-                            ? 'bg-[#E85B49] text-white ring-2 ring-[#E85B49]/30'
-                            : 'bg-white/95 text-[#475569] hover:bg-white hover:text-[#0F172A] border border-[#E2E8F0]/80'
+                            ? 'bg-[#263B35] text-white border-[#263B35]'
+                            : 'bg-white text-[#263B35] hover:bg-[#F7F2E8] border-[#E9E7E1]'
                         }`}
                         title={`Filtrar mapa por ${loc.name}`}
                       >
-                        <MapPin className={`w-3 h-3 ${isLocActive ? 'text-white' : 'text-[#E85B49]'}`} />
+                        <MapPin className={`w-3 h-3 ${isLocActive ? 'text-white' : 'text-[#64748B]'}`} />
                         <span>{loc.name}</span>
                       </button>
                     );
@@ -1950,7 +2088,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 </HorizontalScrollContainer>
               )}
 
-              {/* Carrusel Desplazable de Filtros por Categoría con soporte táctil fluido, degradados y flechas en desktop */}
+              {/* Filtros por Categoría */}
               <HorizontalScrollContainer
                 innerRef={categoryScrollRef}
                 containerClassName="w-full pointer-events-auto"
@@ -1970,10 +2108,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       key={cat.id}
                       type="button"
                       onClick={() => onCategoryChange?.(cat.id)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 flex-shrink-0 shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap shrink-0 flex-shrink-0 transition-colors cursor-pointer flex items-center gap-1.5 border ${
                         isActive
-                          ? 'bg-[#17243A] text-white ring-2 ring-[#17243A]/20'
-                          : 'bg-white/95 text-[#475569] hover:bg-white hover:text-[#0F172A] border border-[#E2E8F0]/80'
+                          ? 'bg-[#263B35] text-white border-[#263B35]'
+                          : 'bg-white text-[#263B35] hover:bg-[#F7F2E8] border-[#E9E7E1]'
                       }`}
                     >
                       <span className="text-[11px]">{cat.icon}</span>
@@ -2051,7 +2189,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         )}
 
         {/* Indicador de estado vacío en Modo Planificar */}
-        {isItineraryMode && selectedDayNumber && trip.activities.filter((a) => a.dayNumber === selectedDayNumber).length === 0 && mapLoaded && (
+        {isItineraryMode && trip && selectedDayNumber && tripActivities.filter((a) => a.dayNumber === selectedDayNumber).length === 0 && mapLoaded && (
           <div className="absolute top-36 left-1/2 -translate-x-1/2 z-10 pointer-events-auto animate-in fade-in duration-200 max-w-[92%] sm:max-w-sm">
             <div className="bg-white/95 backdrop-blur-md border border-[#E2E8F0] rounded-2xl p-4 shadow-lg text-center space-y-2">
               <span className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-500 font-bold text-xs">
@@ -2082,18 +2220,18 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         {/* ============================================================ */}
         {selectedPlace && (
           <div
-            className={`absolute bottom-3 left-3 right-3 sm:right-auto sm:max-w-md z-30 transition-all duration-300 ease-in-out ${
+            className={`absolute bottom-3 left-3 right-3 sm:right-auto sm:max-w-md z-40 transition-all duration-300 ease-in-out ${
               isCardExpanded ? 'max-h-[80vh]' : 'max-h-56'
             }`}
           >
-            <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-xl overflow-hidden flex flex-col">
-              {/* Barra de agarre para arrastrar o alternar estado expandido */}
+            <div className="bg-white rounded-lg border border-[#E9E7E1] shadow-md overflow-hidden flex flex-col">
+              {/* Barra de agarre para alternar estado */}
               <div
                 onClick={() => setIsCardExpanded(!isCardExpanded)}
-                className="w-full py-1.5 flex items-center justify-center cursor-pointer hover:bg-[#F8FAFC] transition-colors"
+                className="w-full py-1.5 flex items-center justify-center cursor-pointer hover:bg-[#F7F2E8] transition-colors"
                 title={isCardExpanded ? 'Contraer ficha' : 'Expandir ficha'}
               >
-                <div className="w-9 h-1 rounded-full bg-slate-300" />
+                <div className="w-8 h-1 rounded-full bg-[#E9E7E1]" />
               </div>
 
               {/* Mensaje de confirmación visual */}
@@ -2106,14 +2244,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
               {/* MODO EXPANDIDO */}
               {isCardExpanded ? (
-                <div className="p-4 space-y-3.5 overflow-y-auto max-h-[72vh]">
+                <div className="p-3.5 space-y-3 overflow-y-auto max-h-[72vh]">
                   {/* Cabecera expandida */}
                   <div className="flex items-start justify-between">
                     <div>
-                      <span className="text-[10px] font-bold text-[#E85B49] uppercase tracking-wider block">
+                      <span className="text-[11px] font-medium text-[#64748B] block">
                         {selectedPlace.category} · {selectedPlace.localityName}
                       </span>
-                      <h3 className="text-base font-bold font-display text-[#17243A] leading-snug">
+                      <h3 className="text-base font-bold text-[#263B35] leading-snug">
                         {selectedPlace.name}
                       </h3>
                     </div>
@@ -2122,7 +2260,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsCardExpanded(false)}
-                        className="p-1 text-[#64748B] hover:text-[#17243A] rounded cursor-pointer"
+                        className="p-1 text-[#64748B] hover:text-[#263B35] rounded cursor-pointer"
                         title="Contraer"
                       >
                         <ChevronDown className="w-4 h-4" />
@@ -2130,7 +2268,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => onSelectPlace(null)}
-                        className="p-1 text-[#64748B] hover:text-[#17243A] rounded cursor-pointer"
+                        className="p-1 text-[#64748B] hover:text-[#263B35] rounded cursor-pointer"
                         title="Cerrar"
                       >
                         <X className="w-4 h-4" />
@@ -2139,7 +2277,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                   </div>
 
                   {/* Imagen completa */}
-                  <div className="relative h-44 sm:h-52 rounded-xl overflow-hidden bg-slate-100 border border-slate-100">
+                  <div className="relative h-44 sm:h-48 rounded-md overflow-hidden bg-slate-100 border border-[#E9E7E1]">
                     <PlaceImage
                       src={selectedPlace.images[0]?.url}
                       alt={selectedPlace.name}
@@ -2148,37 +2286,37 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     />
                   </div>
 
-                  {/* Metadatos (Calificación y MINCETUR) */}
+                  {/* Metadatos (Calificación y Verificación auténtica) */}
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
                       {selectedPlace.rating && (
-                        <div className="flex items-center gap-1 text-amber-600 font-bold">
-                          <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                        <div className="flex items-center gap-1 text-[#263B35] font-medium">
+                          <Star className="w-3.5 h-3.5 fill-[#D9B66F] text-[#D9B66F]" />
                           <span>{selectedPlace.rating}</span>
                           {selectedPlace.reviewsCount && (
-                            <span className="text-[#64748B] font-normal">
-                              ({selectedPlace.reviewsCount})
+                            <span className="text-[#64748B]">
+                              · {selectedPlace.reviewsCount} opiniones
                             </span>
                           )}
                         </div>
                       )}
                     </div>
 
-                    <span className="text-[10px] text-[#27856C] bg-[#27856C]/10 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      {selectedPlace.verification.verificationLevel === 'official_mincetur'
-                        ? 'MINCETUR Oficial'
-                        : 'Verificado'}
-                    </span>
+                    {selectedPlace.verification?.isVerified && (
+                      <span className="text-[11px] text-[#263B35] font-medium flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-[#263B35]" />
+                        Verificado por RiyMo
+                      </span>
+                    )}
                   </div>
 
                   {/* Descripción */}
-                  <p className="text-xs text-[#475569] leading-relaxed">
+                  <p className="text-xs text-[#263B35] leading-relaxed">
                     {selectedPlace.fullDescription || selectedPlace.shortDescription}
                   </p>
 
                   {/* Dirección y Teléfono */}
-                  <div className="pt-2 border-t border-[#E9EEF4] space-y-1.5 text-xs text-[#64748B]">
+                  <div className="pt-2 border-t border-[#E9E7E1] space-y-1 text-xs text-[#64748B]">
                     <div className="flex items-center gap-2">
                       <MapPin className="w-3.5 h-3.5 text-[#E85B49] shrink-0" />
                       <span>{selectedPlace.address}</span>
@@ -2190,57 +2328,81 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       </div>
                     )}
                   </div>
-
-                  {/* Asignación directa a días del viaje con toggle independiente */}
-                  <div className="pt-3 border-t border-[#E9EEF4] space-y-2">
-                    <span className="text-xs font-bold text-[#17243A] block">
-                      Organizar en el Itinerario:
-                    </span>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {dayItems.map((d) => {
-                        const inThisDay = trip.activities.some(
-                          (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                        );
-                        return (
-                          <button
-                            key={d.dayNumber}
-                            type="button"
-                            onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
-                            className={`p-2 rounded-xl text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer ${
-                              inThisDay
-                                ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
-                                : 'bg-[#F8FAFC] text-[#17243A] hover:bg-[#E85B49] hover:text-white border border-[#E2E8F0]'
-                            }`}
-                            title={inThisDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
-                          >
-                            <span>{inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}</span>
-                            <span className="text-[10px] font-normal opacity-80">{d.weekdayShort}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div className="mt-3">
+                    <PlaceVideosSection
+                      placeId={selectedPlace.id}
+                      placeName={selectedPlace.name}
+                      compact={true}
+                    />
                   </div>
+                  {/* Asignación directa a días del viaje con toggle */}
+                  {trip ? (
+                    <div className="pt-2.5 border-t border-[#E9E7E1] space-y-2">
+                      <span className="text-xs font-medium text-[#263B35] block">
+                        Organizar en el Itinerario:
+                      </span>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {dayItems.map((d) => {
+                          const inThisDay = tripActivities.some(
+                            (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                          );
+                          return (
+                            <button
+                              key={d.dayNumber}
+                              type="button"
+                              onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                              className={`p-2 rounded-md text-xs font-medium flex flex-col items-center justify-center transition-all cursor-pointer ${
+                                inThisDay
+                                  ? 'bg-[#263B35] text-white shadow-2xs'
+                                  : 'bg-[#F7F2E8] text-[#263B35] hover:bg-[#E85B49] hover:text-white border border-[#E9E7E1]'
+                              }`}
+                              title={inThisDay ? `Día ${d.dayNumber} asignado` : `Añadir a Día ${d.dayNumber}`}
+                            >
+                              <span>{inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}</span>
+                              <span className="text-[10px] opacity-75">{d.weekdayShort}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="pt-2.5 border-t border-[#E9E7E1] flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-[#64748B]">
+                        Crea o selecciona un viaje para añadirlo a tu itinerario.
+                      </span>
+                      {onOpenCreateModal && (
+                        <button
+                          type="button"
+                          onClick={onOpenCreateModal}
+                          className="px-2.5 py-1.5 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-medium rounded-md transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Crear viaje</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {/* Botón para ver ficha completa en Plan */}
                   {onSwitchToContent && (
                     <button
                       type="button"
                       onClick={() => onSwitchToContent()}
-                      className="w-full py-2 text-xs font-semibold text-[#17243A] bg-[#F1F5F9] hover:bg-[#E2E8F0] rounded-xl transition-colors cursor-pointer text-center"
+                      className="w-full py-1.5 text-xs font-medium text-[#263B35] bg-[#F7F2E8] hover:bg-[#E9E7E1] rounded-md transition-colors cursor-pointer text-center"
                     >
                       Abrir ficha completa en el Planificador →
                     </button>
                   )}
                 </div>
               ) : (
-                /* MODO COMPACTO (Default) */
-                <div className="p-3.5 flex flex-col gap-2.5">
+                /* MODO COMPACTO (Default tipo Google Maps) */
+                <div className="p-3 flex flex-col gap-2">
                   <div className="flex items-start justify-between gap-3">
                     <div
-                      className="flex gap-3 flex-1 min-w-0 cursor-pointer"
+                      className="flex gap-2.5 flex-1 min-w-0 cursor-pointer"
                       onClick={() => setIsCardExpanded(true)}
                     >
-                      <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-slate-100 border border-slate-100">
+                      <div className="w-16 h-16 rounded-md overflow-hidden shrink-0 bg-slate-100 border border-[#E9E7E1]">
                         <PlaceImage
                           src={selectedPlace.images[0]?.url}
                           alt={selectedPlace.name}
@@ -2250,44 +2412,44 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 text-[10px] text-[#64748B] uppercase font-semibold">
-                          <span>{selectedPlace.category}</span>
+                        <div className="flex items-center gap-1.5 text-[11px] text-[#64748B]">
+                          <span>{selectedPlace.category} · {selectedPlace.localityName}</span>
                           {selectedPlaceActivities.length > 0 && (
-                            <span className="text-[#E85B49] font-bold">
+                            <span className="text-[#E85B49] font-medium">
                               · {selectedPlaceActivities.map((a) => `Día ${a.dayNumber}`).join(', ')}
                             </span>
                           )}
                         </div>
 
-                        <h4 className="text-xs sm:text-sm font-bold text-[#17243A] truncate mt-0.5 leading-snug">
+                        <h4 className="text-xs sm:text-sm font-semibold text-[#263B35] truncate mt-0.5 leading-snug">
                           {selectedPlace.name}
                         </h4>
 
-                        <p className="text-[11px] text-[#64748B] truncate mt-0.5">
-                          {selectedPlace.address.split(',')[0]}
-                        </p>
-
                         <div className="flex items-center gap-2 mt-1 text-[11px]">
                           {selectedPlace.rating && (
-                            <span className="flex items-center gap-0.5 text-amber-600 font-bold">
-                              <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                            <span className="flex items-center gap-0.5 text-[#263B35] font-medium">
+                              <Star className="w-3 h-3 fill-[#D9B66F] text-[#D9B66F]" />
                               <span>{selectedPlace.rating}</span>
+                              {selectedPlace.reviewsCount && (
+                                <span className="text-[#64748B]">· {selectedPlace.reviewsCount} opiniones</span>
+                              )}
                             </span>
                           )}
-                          <span className="text-[10px] text-[#27856C] bg-[#27856C]/10 px-1.5 py-0.2 rounded font-medium">
-                            {selectedPlace.verification.verificationLevel === 'official_mincetur'
-                              ? 'MINCETUR'
-                              : 'Verificado'}
-                          </span>
+                          {selectedPlace.verification?.isVerified && (
+                            <span className="text-[10px] text-[#263B35] font-medium flex items-center gap-0.5">
+                              <ShieldCheck className="w-3 h-3 text-[#263B35]" />
+                              Verificado
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1 shrink-0 -mt-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
                         onClick={() => setIsCardExpanded(true)}
-                        className="p-1 text-[#64748B] hover:text-[#17243A] cursor-pointer"
+                        className="p-1 text-[#64748B] hover:text-[#263B35] cursor-pointer"
                         title="Ver detalles completos"
                       >
                         <ChevronUp className="w-4 h-4" />
@@ -2295,7 +2457,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => onSelectPlace(null)}
-                        className="p-1 text-[#64748B] hover:text-[#17243A] cursor-pointer"
+                        className="p-1 text-[#64748B] hover:text-[#263B35] cursor-pointer"
                         title="Cerrar ficha"
                       >
                         <X className="w-4 h-4" />
@@ -2304,61 +2466,79 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                   </div>
 
                   {/* Acciones directas sobre el lugar seleccionado */}
-                  <div className="flex items-center justify-between pt-2 border-t border-[#F1F5F9] text-xs">
-                    {/* Botón Guardar en Wishlist */}
-                    {onToggleSavePlace && (
-                      <button
-                        type="button"
-                        onClick={() => onToggleSavePlace(selectedPlace.id)}
-                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                          isSelectedSaved
-                            ? 'bg-amber-50 border-amber-200 text-amber-800'
-                            : 'bg-white border-[#E2E8F0] text-[#64748B] hover:text-[#17243A]'
-                        }`}
-                        title={isSelectedSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
-                      >
-                        <Bookmark
-                          className={`w-3.5 h-3.5 ${
-                            isSelectedSaved ? 'fill-[#D97706] text-[#D97706]' : ''
+                  {trip ? (
+                    <div className="flex items-center justify-between pt-2 border-t border-[#E9E7E1] text-xs">
+                      {/* Botón Guardar en Wishlist */}
+                      {onToggleSavePlace && (
+                        <button
+                          type="button"
+                          onClick={() => onToggleSavePlace(selectedPlace.id)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-all cursor-pointer ${
+                            isSelectedSaved
+                              ? 'bg-[#F7F2E8] border-[#D9B66F] text-[#263B35]'
+                              : 'bg-white border-[#E9E7E1] text-[#64748B] hover:text-[#263B35]'
                           }`}
-                        />
-                        <span>{isSelectedSaved ? 'Guardado' : 'Guardar'}</span>
-                      </button>
-                    )}
+                          title={isSelectedSaved ? 'Quitar de guardados' : 'Guardar en Por visitar'}
+                        >
+                          <Bookmark
+                            className={`w-3.5 h-3.5 ${
+                              isSelectedSaved ? 'fill-[#D9B66F] text-[#D9B66F]' : ''
+                            }`}
+                          />
+                          <span>{isSelectedSaved ? 'Guardado' : 'Guardar'}</span>
+                        </button>
+                      )}
 
-                    {/* Botones de asignación de días con toggle independiente y scroll suave con flechas */}
-                    <div className="flex-1 min-w-0 flex items-center gap-1.5 pl-2">
-                      <span className="text-[11px] text-[#64748B] shrink-0 font-medium">Añadir a:</span>
-                      <HorizontalScrollContainer
-                        containerClassName="flex-1 min-w-0"
-                        className="gap-1.5 py-0.5"
-                        gradientTheme="white"
-                        arrowSize="sm"
-                        ariaLabel="Asignar lugar a día"
-                      >
-                        {dayItems.map((d) => {
-                          const inThisDay = trip.activities.some(
-                            (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
-                          );
-                          return (
-                            <button
-                              key={d.dayNumber}
-                              type="button"
-                              onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
-                              className={`px-2.5 py-1.5 text-xs rounded-lg font-mono font-semibold shrink-0 flex-shrink-0 whitespace-nowrap transition-all cursor-pointer ${
-                                inThisDay
-                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs'
-                                  : 'bg-[#17243A] text-white hover:bg-[#E85B49] active:scale-95 shadow-2xs'
-                              }`}
-                              title={inThisDay ? `Día ${d.dayNumber} asignado (Pulsar para desasignar)` : `Añadir a Día ${d.dayNumber}`}
-                            >
-                              {inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
-                            </button>
-                          );
-                        })}
-                      </HorizontalScrollContainer>
+                      {/* Botones de asignación de días */}
+                      <div className="flex-1 min-w-0 flex items-center gap-1 pl-2">
+                        <span className="text-[11px] text-[#64748B] shrink-0">Añadir a:</span>
+                        <HorizontalScrollContainer
+                          containerClassName="flex-1 min-w-0"
+                          className="gap-1 py-0.5"
+                          gradientTheme="white"
+                          arrowSize="sm"
+                          ariaLabel="Asignar lugar a día"
+                        >
+                          {dayItems.map((d) => {
+                            const inThisDay = tripActivities.some(
+                              (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
+                            );
+                            return (
+                              <button
+                                key={d.dayNumber}
+                                type="button"
+                                onClick={() => handleToggleDay(selectedPlace, d.dayNumber)}
+                                className={`px-2 py-1 text-xs rounded-md font-medium shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                                  inThisDay
+                                    ? 'bg-[#263B35] text-white'
+                                    : 'bg-[#F7F2E8] text-[#263B35] hover:bg-[#E85B49] hover:text-white border border-[#E9E7E1]'
+                                }`}
+                                title={inThisDay ? `Día ${d.dayNumber} asignado` : `Añadir a Día ${d.dayNumber}`}
+                              >
+                                {inThisDay ? `✓ Día ${d.dayNumber}` : `Día ${d.dayNumber}`}
+                              </button>
+                            );
+                          })}
+                        </HorizontalScrollContainer>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E9E7E1] text-xs">
+                      <span className="text-[11px] text-[#64748B]">
+                        Crea un viaje para planificar este lugar
+                      </span>
+                      {onOpenCreateModal && (
+                        <button
+                          type="button"
+                          onClick={onOpenCreateModal}
+                          className="px-2.5 py-1 bg-[#E85B49] hover:bg-[#D94C3C] text-white text-xs font-medium rounded-md transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Crear viaje</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2368,13 +2548,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         {/* ============================================================ */}
         {/* HERRAMIENTAS FLOTANTES DE CONTROL (INFERIOR DERECHA)         */}
         {/* ============================================================ */}
-        <div className="absolute bottom-4 right-3 z-20 flex flex-col gap-1.5">
+        <div className="absolute bottom-4 right-3 z-20 flex flex-col gap-1">
           {/* Botón de Geolocalización Actual */}
           <button
             type="button"
             onClick={handleLocateUser}
-            className={`p-2.5 bg-white hover:bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] shadow-md transition-all cursor-pointer ${
-              isLocatingUser ? 'animate-pulse text-[#E85B49]' : 'text-[#17243A]'
+            className={`p-2 bg-white hover:bg-[#F7F2E8] rounded-md border border-[#E9E7E1] shadow-xs transition-colors cursor-pointer ${
+              isLocatingUser ? 'text-[#E85B49]' : 'text-[#263B35]'
             }`}
             title="Mi ubicación actual"
             aria-label="Mi ubicación actual"
@@ -2383,11 +2563,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           </button>
 
           {/* Controles de Zoom */}
-          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-md overflow-hidden flex flex-col">
+          <div className="bg-white rounded-md border border-[#E9E7E1] shadow-xs overflow-hidden flex flex-col">
             <button
               type="button"
               onClick={handleZoomIn}
-              className="p-2 text-[#17243A] hover:bg-[#F8FAFC] transition-colors cursor-pointer border-b border-[#F1F5F9]"
+              className="p-2 text-[#263B35] hover:bg-[#F7F2E8] transition-colors cursor-pointer border-b border-[#E9E7E1]"
               title="Acercar mapa"
               aria-label="Acercar mapa"
             >
@@ -2396,7 +2576,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <button
               type="button"
               onClick={handleZoomOut}
-              className="p-2 text-[#17243A] hover:bg-[#F8FAFC] transition-colors cursor-pointer"
+              className="p-2 text-[#263B35] hover:bg-[#F7F2E8] transition-colors cursor-pointer"
               title="Alejar mapa"
               aria-label="Alejar mapa"
             >
@@ -2408,7 +2588,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           <button
             type="button"
             onClick={handleFitAllMarkers}
-            className="p-2.5 bg-white hover:bg-[#F8FAFC] text-[#17243A] rounded-xl border border-[#E2E8F0] shadow-md transition-colors cursor-pointer"
+            className="p-2 bg-white hover:bg-[#F7F2E8] text-[#263B35] rounded-md border border-[#E9E7E1] shadow-xs transition-colors cursor-pointer"
             title="Ajustar vista a los lugares visibles"
           >
             <Layers className="w-4 h-4" />
@@ -2418,8 +2598,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           <button
             type="button"
             onClick={handleResetCenter}
-            className="p-2.5 bg-white hover:bg-[#F8FAFC] text-[#17243A] rounded-xl border border-[#E2E8F0] shadow-md transition-colors cursor-pointer"
-            title={`Centrar en ${trip.destinationName}`}
+            className="p-2 bg-white hover:bg-[#F7F2E8] text-[#263B35] rounded-md border border-[#E9E7E1] shadow-xs transition-colors cursor-pointer"
+            title={`Centrar en ${trip ? trip.destinationName : 'La Libertad'}`}
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -2486,23 +2666,25 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 </div>
               </div>
 
-              {/* Solo Guardados */}
-              <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-[#17243A] block">
-                    Solo lugares guardados
-                  </span>
-                  <span className="text-[11px] text-[#64748B]">
-                    Muestra únicamente lugares en tu lista Por visitar
-                  </span>
+              {/* Solo Guardados (solo disponible cuando hay viaje activo) */}
+              {trip && (
+                <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-[#17243A] block">
+                      Solo lugares guardados
+                    </span>
+                    <span className="text-[11px] text-[#64748B]">
+                      Muestra únicamente lugares en tu lista Por visitar
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={onlySavedFilter}
+                    onChange={(e) => setOnlySavedFilter(e.target.checked)}
+                    className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
+                  />
                 </div>
-                <input
-                  type="checkbox"
-                  checked={onlySavedFilter}
-                  onChange={(e) => setOnlySavedFilter(e.target.checked)}
-                  className="w-4 h-4 text-[#E85B49] rounded border-[#E2E8F0] cursor-pointer accent-[#E85B49]"
-                />
-              </div>
+              )}
 
               {/* Calificación mínima */}
               <div className="pt-2 border-t border-[#F1F5F9] space-y-1.5">
@@ -2581,7 +2763,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       {/* ============================================================ */}
       {/* BOTTOM SHEET SELECTOR DE DÍA (EXCLUSIVO MOBILE - md:hidden) */}
       {/* ============================================================ */}
-      {quickDayPickerOpen && selectedPlace && (
+      {quickDayPickerOpen && selectedPlace && trip && (
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex flex-col justify-end md:hidden animate-in fade-in duration-200"
           onClick={() => setQuickDayPickerOpen(false)}
@@ -2621,10 +2803,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2.5 max-h-[50dvh] overscroll-contain pb-4">
               {dayItems.map((d) => {
                 const isSelected = selectedDayToAssign === d.dayNumber;
-                const isAlreadyIn = trip.activities.some(
+                const isAlreadyIn = tripActivities.some(
                   (a) => a.placeId === selectedPlace.id && a.dayNumber === d.dayNumber
                 );
-                const dayActCount = trip.activities.filter(
+                const dayActCount = tripActivities.filter(
                   (a) => a.dayNumber === d.dayNumber
                 ).length;
 
@@ -2699,7 +2881,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             {/* Pie fijo con botón de confirmación y cancelación */}
             <div className="p-4 border-t border-[#F1F5F9] bg-white flex flex-col gap-2 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
               {(() => {
-                const isSelectedDayAlreadyIn = trip.activities.some(
+                const isSelectedDayAlreadyIn = tripActivities.some(
                   (a) => a.placeId === selectedPlace.id && a.dayNumber === selectedDayToAssign
                 );
 

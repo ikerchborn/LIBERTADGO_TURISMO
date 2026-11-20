@@ -22,6 +22,37 @@ export interface PlaceAuditEntry {
   createdAt: string;
 }
 
+export type AuditModule = 'places' | 'creators' | 'videos';
+
+export interface CreatorAuditEntry {
+  id: string;
+  creatorId: string;
+  creatorHandle: string;
+  creatorDisplayName?: string | null;
+  adminUserId: string;
+  adminName: string;
+  action: 'CREATE' | 'UPDATE' | 'VISIBILITY_CHANGE';
+  previousData?: any | null;
+  newData?: any | null;
+  changeSummary: string;
+  createdAt: string;
+}
+
+export interface UnifiedAuditEntry {
+  id: string;
+  module: AuditModule;
+  entityId: string;
+  entityName: string;
+  action: string;
+  adminUserId: string;
+  adminName: string;
+  previousStatus?: string | null;
+  newStatus?: string | null;
+  changeSummary: string;
+  details?: Record<string, any> | null;
+  createdAt: string;
+}
+
 export interface PlaceAdminFilters {
   search?: string;
   status?: PlaceStatus | 'ALL';
@@ -56,4 +87,59 @@ export interface AdminDashboardMetrics {
   sourcesDistribution: { sourceId: string; count: number }[];
   potentialDuplicatesCount: number;
   recentAuditLogs: PlaceAuditEntry[];
+  // Extended RiyMo Platform Metrics
+  creators?: {
+    total: number;
+    publicCount: number;
+    hiddenCount: number;
+    verifiedCount: number;
+    byPlatform: {
+      tiktok: number;
+      instagram: number;
+      youtube: number;
+    };
+    totalAudienceFollowers: number;
+    topCreators: Array<{
+      id: string;
+      handle: string;
+      displayName: string;
+      avatarUrl?: string | null;
+      platform: string;
+      followers: number;
+      isVerified?: boolean;
+    }>;
+  };
+  videos?: {
+    total: number;
+    approved: number;
+    pending: number;
+    observed: number;
+    rejected: number;
+    byPlatform: {
+      tiktok: number;
+      instagram: number;
+      youtube: number;
+    };
+    byCategory: Array<{ category: string; count: number }>;
+    placesWithVideosCount: number;
+    catalogCoveragePercent: number;
+  };
+  engagement?: {
+    totalInternalViews: number;
+    totalInternalSaves: number;
+    totalExternalViews: number;
+    totalExternalLikes: number;
+    totalExternalComments: number;
+  };
+  recentActivity?: UnifiedAuditEntry[];
+  timeline?: Array<{
+    date: string;
+    label: string;
+    places: number;
+    creators: number;
+    videos: number;
+    audits: number;
+    total: number;
+  }>;
 }
+
