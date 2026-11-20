@@ -3,6 +3,7 @@ import { Compass, MapPin, Calendar, ArrowRight, Check, AlertCircle } from 'lucid
 import { LA_LIBERTAD_LOCALITIES, Locality } from '../types/geo.ts';
 import { calculateTripDuration, formatDateRange } from '../utils/dateUtils.ts';
 import { TripItinerary } from '../types/catalog.ts';
+import { DateRangePicker } from './common/DateRangePicker.tsx';
 
 interface TripCreationScreenProps {
   onTripCreated: (trip: TripItinerary) => void;
@@ -223,42 +224,18 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
             </div>
 
             {/* 2. Fechas de viaje */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label
-                  htmlFor="start-date-input"
-                  className="block text-[11px] font-semibold text-[#17243A] uppercase tracking-wider mb-1"
-                >
-                  Fecha de llegada
-                </label>
-                <input
-                  id="start-date-input"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] font-mono focus:outline-none focus:border-[#17243A]"
-                  required
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="end-date-input"
-                  className="block text-[11px] font-semibold text-[#17243A] uppercase tracking-wider mb-1"
-                >
-                  Fecha de salida
-                </label>
-                <input
-                  id="end-date-input"
-                  type="date"
-                  value={endDate}
-                  min={startDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl text-[#17243A] font-mono focus:outline-none focus:border-[#17243A]"
-                  required
-                />
-              </div>
-            </div>
+            <DateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              onChange={({ startDate: nextStart, endDate: nextEnd }) => {
+                setStartDate(nextStart);
+                setEndDate(nextEnd);
+              }}
+              startLabel="Fecha de llegada"
+              endLabel="Fecha de salida"
+              startId="start-date-input"
+              endId="end-date-input"
+            />
 
             {/* Resumen sutil reactivo de fechas */}
             <div className="flex items-center justify-between px-3 py-1.5 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] text-xs">

@@ -47500,13 +47500,6 @@ var init_geoBoundary = __esm({
 });
 
 // src/server/repositories/placeRepository.ts
-var placeRepository_exports = {};
-__export(placeRepository_exports, {
-  PlaceRepository: () => PlaceRepository,
-  getPlaceRepository: () => getPlaceRepository,
-  resetPlaceRepositoryForTesting: () => resetPlaceRepositoryForTesting,
-  setPlaceRepositoryInstance: () => setPlaceRepositoryInstance
-});
 import crypto from "crypto";
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
@@ -47566,9 +47559,6 @@ function getPlaceRepository() {
 }
 function setPlaceRepositoryInstance(repo) {
   placeRepositoryInstance = repo;
-}
-function resetPlaceRepositoryForTesting() {
-  placeRepositoryInstance = new PlaceRepository();
 }
 var PlaceRepository, placeRepositoryInstance;
 var init_placeRepository = __esm({
@@ -50037,6 +50027,35 @@ async function verifyDatabaseConnectivity() {
     try {
       await activeDatabaseAdapter.testConnection();
       console.log("[Storage Architecture] Database connectivity verified successfully with PostgreSQL.");
+      try {
+        const pool = getDbPool();
+        const tableCheck = await pool.query(`
+          SELECT table_name FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_name = 'places'
+        `);
+        if (tableCheck.rows.length > 0) {
+          console.log('[Storage Architecture] PostgreSQL "places" catalog schema detected. Activating persistent PostgresPlaceRepository.');
+          setPlaceRepositoryInstance(new PostgresPlaceRepository(pool));
+        } else {
+          if (isProduction2) {
+            throw new Error(
+              '[Storage Architecture] FATAL: Table "places" does not exist in PostgreSQL. Migration 0002_places_catalog_schema.sql must be executed in Neon.'
+            );
+          } else {
+            console.warn(
+              '[Storage Architecture] WARNING: Table "places" does not exist in PostgreSQL yet. Migration 0002_places_catalog_schema.sql is pending in Neon. Catalog operating with in-memory adapter (297 verified places).'
+            );
+            setPlaceRepositoryInstance(new PlaceRepository());
+          }
+        }
+      } catch (schemaErr) {
+        if (isProduction2) {
+          throw schemaErr;
+        } else {
+          console.warn("[Storage Architecture] Catalog table check skipped/failed in development:", schemaErr instanceof Error ? schemaErr.message : String(schemaErr));
+          setPlaceRepositoryInstance(new PlaceRepository());
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(
@@ -50054,11 +50073,7 @@ async function verifyDatabaseConnectivity() {
         authRepoInstance = memoryAdapter;
         creatorsRepoInstance = memoryAdapter;
         activeDatabaseAdapter = memoryAdapter;
-        try {
-          const { setPlaceRepositoryInstance: setPlaceRepositoryInstance2 } = await Promise.resolve().then(() => (init_placeRepository(), placeRepository_exports));
-          setPlaceRepositoryInstance2(null);
-        } catch {
-        }
+        setPlaceRepositoryInstance(new PlaceRepository());
       }
     }
   } else if (isProduction2) {
@@ -52442,7 +52457,9 @@ apiRouter.get("/route", async (req, res) => {
     return;
   }
   try {
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`;
+    const rawProfile = typeof req.query.profile === "string" ? req.query.profile.trim().toLowerCase() : "driving";
+    const osrmProfile = rawProfile === "walking" || rawProfile === "foot" ? "foot" : "driving";
+    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${coordinates}?overview=full&geometries=geojson`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6e3);
     const osrmResponse = await fetch(osrmUrl, {

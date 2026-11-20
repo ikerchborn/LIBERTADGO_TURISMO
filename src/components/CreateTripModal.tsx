@@ -3,6 +3,7 @@ import { MapPin, Calendar, ArrowRight, X, AlertCircle, Check } from 'lucide-reac
 import { LA_LIBERTAD_LOCALITIES } from '../types/geo.ts';
 import { calculateTripDuration, formatDateRange } from '../utils/dateUtils.ts';
 import { TripItinerary } from '../types/catalog.ts';
+import { DateRangePicker } from './common/DateRangePicker.tsx';
 
 interface CreateTripModalProps {
   isOpen: boolean;
@@ -207,35 +208,20 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           </div>
 
           {/* Fechas */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="modal-start-date" className="block text-xs font-semibold text-[#17243A] uppercase tracking-wider mb-1.5">
-                Llegada
-              </label>
-              <input
-                id="modal-start-date"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl font-mono text-[#17243A] focus:outline-none focus:border-[#17243A]"
-                required
-              />
-            </div>
-            <div>
-              <label htmlFor="modal-end-date" className="block text-xs font-semibold text-[#17243A] uppercase tracking-wider mb-1.5">
-                Salida
-              </label>
-              <input
-                id="modal-end-date"
-                type="date"
-                value={endDate}
-                min={startDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-[#F7F8FA] border border-[#E9EEF4] rounded-xl font-mono text-[#17243A] focus:outline-none focus:border-[#17243A]"
-                required
-              />
-            </div>
-          </div>
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={({ startDate: nextStart, endDate: nextEnd }) => {
+              setStartDate(nextStart);
+              setEndDate(nextEnd);
+            }}
+            startLabel="Fecha de llegada"
+            endLabel="Fecha de salida"
+            startId="modal-start-date"
+            endId="modal-end-date"
+            labelClassName="block text-xs font-semibold text-[#17243A] uppercase tracking-wider mb-1.5"
+            gapClassName="gap-3"
+          />
 
           {/* Resumen */}
           <div className="flex items-center justify-between px-3 py-2 bg-[#F7F8FA] rounded-xl border border-[#E9EEF4] text-xs">

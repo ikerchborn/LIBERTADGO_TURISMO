@@ -57,7 +57,7 @@ export const LA_LIBERTAD_LOCALITIES: Locality[] = [
     isPriority: true,
     description: 'La Ciudad de la Eterna Primavera, centro histórico monumental, gastronomía norteña y cuna de la Marinera.',
     highlights: ['Plaza Mayor', 'Catedral de Trujillo', 'El Rincón de Vallejo', 'Casonas Coloniales'],
-    heroImage: 'https://images.unsplash.com/photo-1580619305218-8423a7ef79b4?auto=format&fit=crop&w=1200&q=80',
+    heroImage: 'https://content.emarket.pe/common/collections/standard/bb/48/bb481695-657c-486c-bb3d-856651b33959.jpg',
   },
   {
     id: 'huanchaco',
@@ -69,7 +69,7 @@ export const LA_LIBERTAD_LOCALITIES: Locality[] = [
     isPriority: true,
     description: 'Histórico balneario y Reserva Mundial de Surf con milenarios caballitos de totora y cevicherías frente al mar.',
     highlights: ['Caballitos de totora', 'Muelle de Huanchaco', 'Ceviche tradicional', 'Surf en el Pacífico'],
-    heroImage: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    heroImage: 'https://cloudfront-us-east-1.images.arcpublishing.com/infobae/EA5E2RIHNVCGTNWMJBDZO5CHT4.jpg',
   },
   {
     id: 'moche',
@@ -81,7 +81,7 @@ export const LA_LIBERTAD_LOCALITIES: Locality[] = [
     isPriority: true,
     description: 'Corazón de la cultura Mochica, hogar de las majestuosas Huaca del Sol y de la Luna y campiña tradicional.',
     highlights: ['Huaca de la Luna', 'Huaca del Sol', 'Museo Huacas de Moche', 'Sopa teóloga'],
-    heroImage: 'https://images.unsplash.com/photo-1589802829985-817e51171b92?auto=format&fit=crop&w=1200&q=80',
+    heroImage: 'https://arqueologiadelperu.com/wp-content/uploads/2024/08/imagesqtbnANd9GcT0Dn0UNR4acQ88RjOb_0itTRHhNJfiuMS6SAvHlSdFC-9GQEIPKX7GpwkeVdjf.jpg',
   },
   {
     id: 'victor-larco',
@@ -93,7 +93,7 @@ export const LA_LIBERTAD_LOCALITIES: Locality[] = [
     isPriority: true,
     description: 'Distrito costero moderno que integra Buenos Aires, el Paseo de las Aguas y gastronomía marina de vanguardia.',
     highlights: ['Paseo de las Aguas', 'Plaza de Armas de Vista Alegre', 'Restaurantes de autor'],
-    heroImage: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&q=80',
+    heroImage: 'https://munivictorlarco.gob.pe/turismo/wp-content/uploads/2019/08/4327e98423c53b9d091ee208525bc9c9-300x225.jpg',
   },
   {
     id: 'la-esperanza',

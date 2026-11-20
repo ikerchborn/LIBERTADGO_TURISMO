@@ -22,6 +22,12 @@ import { Place, TripItinerary, TripActivity } from '../../types/catalog.ts';
 import { generateDayList, TripDayItem } from '../../utils/dateUtils.ts';
 import { getDayColor, getActivitiesForDay } from '../../utils/itineraryUtils.ts';
 import { calculateRealRoute, RouteData } from '../../utils/routingService.ts';
+import {
+  getTransitBetweenPlaces,
+  resolveTransitBetweenPlaces,
+  type TransitOption,
+} from '../../utils/transitService.ts';
+import { TransitLegCard } from './TransitLegCard.tsx';
 import { PlaceImage } from '../common/PlaceImage.tsx';
 import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
 
@@ -133,6 +139,66 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   const [dayRoutes, setDayRoutes] = useState<
     Record<number, { data: RouteData | null; isUnavailable: boolean; loading: boolean }>
   >({});
+
+  // Rutas de transporte público (micros, combis, buses, caminata, taxi) entre paradas consecutivas
+  const [resolvedTransitOptions, setResolvedTransitOptions] = useState<
+    Record<string, TransitOption>
+  >({});
+  const [isResolvingTransit, setIsResolvingTransit] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDayTransit() {
+      const pairs: Array<{ key: string; origin: Place; destination: Place }> = [];
+      for (const day of dayItems) {
+        const dayActs = getActivitiesForDay(trip.activities, day.dayNumber);
+        const dayPlaces = dayActs
+          .map((act) => act.place || placesMap.get(act.placeId))
+          .filter((p): p is Place => Boolean(p?.coordinates));
+        for (let i = 0; i < dayPlaces.length - 1; i += 1) {
+          const origin = dayPlaces[i];
+          const destination = dayPlaces[i + 1];
+          const key = `${origin.id}>${destination.id}`;
+          if (!pairs.some((p) => p.key === key)) {
+            pairs.push({ key, origin, destination });
+          }
+        }
+      }
+
+      if (pairs.length === 0) {
+        if (!cancelled) {
+          setResolvedTransitOptions({});
+          setIsResolvingTransit(false);
+        }
+        return;
+      }
+
+      setIsResolvingTransit(true);
+      try {
+        const entries = await Promise.all(
+          pairs.map(async ({ key, origin, destination }) => {
+            const option = await resolveTransitBetweenPlaces(origin, destination);
+            return [key, option] as const;
+          })
+        );
+        if (!cancelled) {
+          setResolvedTransitOptions(Object.fromEntries(entries));
+        }
+      } catch (err) {
+        console.warn('[ItineraryView] Error resolving transit routes:', err);
+      } finally {
+        if (!cancelled) {
+          setIsResolvingTransit(false);
+        }
+      }
+    }
+
+    void loadDayTransit();
+    return () => {
+      cancelled = true;
+    };
+  }, [trip.activities, dayItems, placesMap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -606,6 +672,17 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                   {dayActs.map((act, idx) => {
                     // Resolver el lugar asociado
                     const place = act.place || placesMap.get(act.placeId);
+                    const nextAct = dayActs[idx + 1];
+                    const nextPlace = nextAct
+                      ? nextAct.place || placesMap.get(nextAct.placeId)
+                      : undefined;
+                    const transitKey =
+                      place && nextPlace ? `${place.id}>${nextPlace.id}` : null;
+                    const transitOption =
+                      place && nextPlace && transitKey
+                        ? resolvedTransitOptions[transitKey] ??
+                          getTransitBetweenPlaces(place, nextPlace)
+                        : null;
                     const isSelected = selectedPlace?.id === place?.id;
                     const isDraggingThis = draggedActivityId === act.id;
                     const isDropTargetBefore =
@@ -614,8 +691,8 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                       dragOverTarget?.activityId === act.id && dragOverTarget?.position === 'after';
 
                     return (
+                      <React.Fragment key={act.id}>
                       <div
-                        key={act.id}
                         draggable
                         onDragStart={(e) => handleDragStart(e, act)}
                         onDragOver={(e) => handleDragOverCard(e, act, day.dayNumber)}
@@ -810,6 +887,15 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                           </div>
                         </div>
                       </div>
+                      {place && nextPlace && transitOption && (
+                        <TransitLegCard
+                          origin={place}
+                          destination={nextPlace}
+                          transit={transitOption}
+                          isResolving={isResolvingTransit && !resolvedTransitOptions[transitKey!]}
+                        />
+                      )}
+                      </React.Fragment>
                     );
                   })}
                 </div>
