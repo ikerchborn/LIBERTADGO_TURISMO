@@ -49,8 +49,11 @@ export const SourcesView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     fetch('/api/admin/sources', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
+      credentials: 'include',
     })
       .then((res) => res.json())
       .then((data) => {

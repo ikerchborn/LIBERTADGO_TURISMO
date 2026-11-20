@@ -351,12 +351,14 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
 
     setIsCreatingCreator(true);
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/admin/creators', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({
           handle: cleanHandle,
           displayName: inlineDisplayName.trim(),
@@ -477,12 +479,14 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
       const endpoint = isEditing ? `/api/admin/videos/${initialVideo!.id}` : '/api/admin/videos';
       const method = isEditing ? 'PUT' : 'POST';
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(endpoint, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify(payload),
       });
 

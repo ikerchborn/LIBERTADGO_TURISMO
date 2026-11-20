@@ -44,8 +44,11 @@ export const CreatorHistoryModal: React.FC<CreatorHistoryModalProps> = ({
   useEffect(() => {
     if (!isOpen || !creatorId) return;
     setIsLoading(true);
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     fetch(`/api/admin/creators/${encodeURIComponent(creatorId)}/history`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
+      credentials: 'include',
     })
       .then((res) => res.json())
       .then((json) => {

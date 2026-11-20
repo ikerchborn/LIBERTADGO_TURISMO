@@ -20,6 +20,7 @@ import {
 import { AdminPlaceRecord, PlaceStatus } from '../../types/adminCatalog.ts';
 import { PlaceCategory } from '../../types/catalog.ts';
 import { LA_LIBERTAD_LOCALITIES } from '../../types/geo.ts';
+import { useAuth } from '../../context/AuthContext.tsx';
 
 interface PlacesListViewProps {
   onEditPlace: (place: AdminPlaceRecord) => void;
@@ -34,12 +35,14 @@ export const PlacesListView: React.FC<PlacesListViewProps> = ({
   onViewPlaceHistory,
   refreshKey,
 }) => {
+  const { token } = useAuth();
   const [places, setPlaces] = useState<AdminPlaceRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -61,19 +64,28 @@ export const PlacesListView: React.FC<PlacesListViewProps> = ({
       params.set('page', String(page));
       params.set('limit', '20');
 
-      const res = await fetch(`/api/admin/places?${params.toString()}`, {      
-          credentials: 'include',
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`/api/admin/places?${params.toString()}`, {
+        headers,
+        credentials: 'include',
       });
 
       if (!res.ok) {
-        throw new Error('Error al consultar lugares');
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || 'Error al consultar lugares');
       }
 
       const json = await res.json();
       if (json.success) {
-        setPlaces(json.data);
-        setTotal(json.total);
-        setTotalPages(json.totalPages);
+        setPlaces(Array.isArray(json.data) ? json.data : []);
+        setTotal(typeof json.total === 'number' ? json.total : 0);
+        setTotalPages(typeof json.totalPages === 'number' ? Math.max(1, json.totalPages) : 1);
+      } else {
+        throw new Error(json.error || 'Error al consultar lugares');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al cargar catálogo');
@@ -84,12 +96,15 @@ export const PlacesListView: React.FC<PlacesListViewProps> = ({
 
   useEffect(() => {
     fetchPlaces();
-  }, [page, status, category, localityId, isVerified, refreshKey]);
+  }, [page, status, category, localityId, isVerified, refreshKey, token]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
-    fetchPlaces();
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      fetchPlaces();
+    }
   };
 
   const handleQuickStatusChange = async (
@@ -97,22 +112,28 @@ export const PlacesListView: React.FC<PlacesListViewProps> = ({
     newStatus: PlaceStatus
   ) => {
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch(`/api/admin/places/${placeId}/status`, {
         method: 'PATCH',
         credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           status: newStatus,
           reason: `Cambio rápido desde la tabla administrativa a ${newStatus}`,
         }),
       });
-  
-      if (!res.ok) {
-        throw new Error('No se pudo actualizar el estado del lugar.');
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || 'No se pudo actualizar el estado del lugar.');
       }
-  
+
       setPlaces((prev) =>
         prev.map((place) =>
           place.id === placeId
@@ -120,15 +141,19 @@ export const PlacesListView: React.FC<PlacesListViewProps> = ({
             : place
         )
       );
-  
+      setActionNotice({
+        type: 'success',
+        message: json?.message || 'Estado del lugar actualizado correctamente.',
+      });
     } catch (err) {
       console.error('Error al cambiar el estado del lugar:', err);
-  
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'No se pudo actualizar el estado del lugar.'
-      );
+      setActionNotice({
+        type: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'No se pudo actualizar el estado del lugar.',
+      });
     }
   };
 
@@ -271,6 +296,23 @@ export const PlacesListView: React.FC<PlacesListViewProps> = ({
           </div>
         </div>
       </div>
+
+      {actionNotice && (
+        <div
+          className={`p-3 rounded-lg text-xs flex items-center gap-2 border ${
+            actionNotice.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-red-50 border-red-200 text-red-800'
+          }`}
+        >
+          {actionNotice.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+          )}
+          <span>{actionNotice.message}</span>
+        </div>
+      )}
 
       {/* Main Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">

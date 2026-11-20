@@ -20,8 +20,11 @@ export const LocalitiesView: React.FC<LocalitiesViewProps> = ({ onFilterByLocali
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     fetch('/api/admin/localities', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
+      credentials: 'include',
     })
       .then((res) => res.json())
       .then((data) => {

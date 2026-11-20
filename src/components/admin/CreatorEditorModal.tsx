@@ -120,13 +120,15 @@ export const CreatorEditorModal: React.FC<CreatorEditorModalProps> = ({
     setIsUploading(true);
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': file.type || 'image/jpeg',
+        'X-Filename': encodeURIComponent(file.name),
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/admin/uploads/avatar', {
         method: 'POST',
-        headers: {
-          'Content-Type': file.type || 'image/jpeg',
-          'X-Filename': encodeURIComponent(file.name),
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: file,
       });
 
@@ -228,12 +230,14 @@ export const CreatorEditorModal: React.FC<CreatorEditorModalProps> = ({
         isVerified,
       };
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/admin/creators', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify(payload),
       });
 

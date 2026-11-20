@@ -25,8 +25,11 @@ export const DuplicatesView: React.FC = () => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/admin/duplicates', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
+        credentials: 'include',
       });
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
@@ -49,12 +52,14 @@ export const DuplicatesView: React.FC = () => {
     setSuccessMessage(null);
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/admin/duplicates/merge', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({
           primaryId: pair.primaryPlace.id,
           duplicateIds: [pair.duplicatePlace.id],

@@ -71,8 +71,11 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({ onFilterByCatego
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     fetch('/api/admin/categories', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
+      credentials: 'include',
     })
       .then((res) => res.json())
       .then((data) => {

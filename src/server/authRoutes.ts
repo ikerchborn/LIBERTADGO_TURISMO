@@ -13,13 +13,21 @@ export const authRouter = Router();
 
 const isProduction = process.env.NODE_ENV === 'production';
 const COOKIE_NAME = 'libertadgo_token';
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: isProduction,
-  sameSite: 'strict' as const,
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  path: '/',
-};
+
+function getCookieOptions(req: Request) {
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const proto = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto;
+  const isHttps = req.secure || proto === 'https';
+  const useSecure = isProduction || isHttps;
+
+  return {
+    httpOnly: true,
+    secure: useSecure,
+    sameSite: useSecure ? ('none' as const) : ('lax' as const),
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: '/',
+  };
+}
 
 // POST /api/auth/register
 authRouter.post('/register', authRateLimiter, async (req: Request, res: Response) => {
@@ -58,8 +66,8 @@ authRouter.post('/register', authRateLimiter, async (req: Request, res: Response
       role: newUser.role,
     });
 
-    // Set HttpOnly, SameSite strict session cookie
-    res.cookie(COOKIE_NAME, token, COOKIE_OPTIONS);
+    // Set HttpOnly session cookie
+    res.cookie(COOKIE_NAME, token, getCookieOptions(req));
 
     res.status(201).json({
       success: true,
@@ -120,8 +128,8 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       role: user.role,
     });
 
-    // Set HttpOnly, SameSite strict session cookie
-    res.cookie(COOKIE_NAME, token, COOKIE_OPTIONS);
+    // Set HttpOnly session cookie
+    res.cookie(COOKIE_NAME, token, getCookieOptions(req));
 
     res.json({
       success: true,
@@ -144,19 +152,38 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
 
 // POST /api/auth/logout
 authRouter.post('/logout', async (req: Request, res: Response) => {
-  // Extract token from Authorization header or cookie
+  const tokensToRevoke = new Set<string>();
+
   const authHeader = req.headers.authorization;
-  let token: string | null = null;
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (req.headers.cookie) {
-    const match = req.headers.cookie.match(/libertadgo_token=([^;]+)/);
-    if (match) token = match[1];
-  } else if (req.body?.token) {
-    token = req.body.token;
+    const bearerToken = authHeader.substring(7).trim();
+    if (bearerToken && bearerToken !== 'null' && bearerToken !== 'undefined') {
+      tokensToRevoke.add(bearerToken);
+    }
   }
 
-  if (token) {
+  if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/(?:^|;\s*)libertadgo_token=([^;]+)/);
+    if (match && match[1]) {
+      try {
+        const cookieToken = decodeURIComponent(match[1]).trim();
+        if (cookieToken && cookieToken !== 'null' && cookieToken !== 'undefined') {
+          tokensToRevoke.add(cookieToken);
+        }
+      } catch {
+        tokensToRevoke.add(match[1].trim());
+      }
+    }
+  }
+
+  if (typeof req.body?.token === 'string') {
+    const bodyToken = req.body.token.trim();
+    if (bodyToken && bodyToken !== 'null' && bodyToken !== 'undefined') {
+      tokensToRevoke.add(bodyToken);
+    }
+  }
+
+  for (const token of tokensToRevoke) {
     try {
       await revokeToken(token, req.user?.userId);
     } catch (err) {
@@ -164,12 +191,13 @@ authRouter.post('/logout', async (req: Request, res: Response) => {
     }
   }
 
-  // Clear session cookie
+  const cookieOpts = getCookieOptions(req);
+  // Clear session cookie using matching attributes
   res.clearCookie(COOKIE_NAME, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: 'strict',
-    path: '/',
+    httpOnly: cookieOpts.httpOnly,
+    secure: cookieOpts.secure,
+    sameSite: cookieOpts.sameSite,
+    path: cookieOpts.path,
   });
 
   res.json({ success: true, message: 'Sesión cerrada correctamente' });

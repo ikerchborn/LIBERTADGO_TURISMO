@@ -70,6 +70,7 @@ function registerGracefulShutdown(server: Server): void {
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1);
 
   // AI Studio and development dev-server port handling
   let cliPort: number | null = null;

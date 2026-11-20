@@ -44,9 +44,11 @@ export const AdminCreatorModerationView: React.FC = () => {
   const handleToggleCreatorVisibility = async () => {
     setIsTogglingVisibility(true);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/admin/creators/${visibilityDialog.creatorId}`, {
         method: 'PUT', credentials: 'include',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers,
         body: JSON.stringify({ isPublic: visibilityDialog.targetStatus }),
       });
       const json = await res.json();
@@ -62,7 +64,9 @@ export const AdminCreatorModerationView: React.FC = () => {
 
   const fetchAllVideos = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/moderation/queue?status=ALL', { headers: { Authorization: `Bearer ${token}` } });
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/admin/moderation/queue?status=ALL', { headers, credentials: 'include' });
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) setAllVideos(json.data);
     } catch (err) {
@@ -76,7 +80,9 @@ export const AdminCreatorModerationView: React.FC = () => {
       const url = statusFilter === 'ALL'
         ? '/api/admin/moderation/queue?status=ALL'
         : `/api/admin/moderation/queue?status=${statusFilter}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(url, { headers, credentials: 'include' });
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) setVideos(json.data);
       await fetchAllVideos();
@@ -90,7 +96,9 @@ export const AdminCreatorModerationView: React.FC = () => {
   const fetchCreators = useCallback(async () => {
     setIsLoadingCreators(true);
     try {
-      const res = await fetch('/api/admin/creators', { headers: { Authorization: `Bearer ${token}` } });
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/admin/creators', { headers, credentials: 'include' });
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) setCreators(json.data);
     } catch (err) {
@@ -114,9 +122,12 @@ export const AdminCreatorModerationView: React.FC = () => {
     setVideos((prev) => prev.map((v) => v.id === id ? { ...v, status: targetStatus, moderationNotes: reason || v.moderationNotes } : v));
     setAllVideos((prev) => prev.map((v) => v.id === id ? { ...v, status: targetStatus, moderationNotes: reason || v.moderationNotes } : v));
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/admin/moderation/${id}/action`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({ action, reason: reason || (action === 'APPROVE' ? 'Aprobado por el equipo editorial' : 'Moderado por administración'), internalNotes }),
       });
       const json = await res.json();
