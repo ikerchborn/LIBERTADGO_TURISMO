@@ -47358,7 +47358,7 @@ var init_geo = __esm({
         isPriority: true,
         description: "La Ciudad de la Eterna Primavera, centro hist\xF3rico monumental, gastronom\xEDa norte\xF1a y cuna de la Marinera.",
         highlights: ["Plaza Mayor", "Catedral de Trujillo", "El Rinc\xF3n de Vallejo", "Casonas Coloniales"],
-        heroImage: "https://images.unsplash.com/photo-1580619305218-8423a7ef79b4?auto=format&fit=crop&w=1200&q=80"
+        heroImage: "https://content.emarket.pe/common/collections/standard/bb/48/bb481695-657c-486c-bb3d-856651b33959.jpg"
       },
       {
         id: "huanchaco",
@@ -47370,7 +47370,7 @@ var init_geo = __esm({
         isPriority: true,
         description: "Hist\xF3rico balneario y Reserva Mundial de Surf con milenarios caballitos de totora y cevicher\xEDas frente al mar.",
         highlights: ["Caballitos de totora", "Muelle de Huanchaco", "Ceviche tradicional", "Surf en el Pac\xEDfico"],
-        heroImage: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80"
+        heroImage: "https://cloudfront-us-east-1.images.arcpublishing.com/infobae/EA5E2RIHNVCGTNWMJBDZO5CHT4.jpg"
       },
       {
         id: "moche",
@@ -47382,7 +47382,7 @@ var init_geo = __esm({
         isPriority: true,
         description: "Coraz\xF3n de la cultura Mochica, hogar de las majestuosas Huaca del Sol y de la Luna y campi\xF1a tradicional.",
         highlights: ["Huaca de la Luna", "Huaca del Sol", "Museo Huacas de Moche", "Sopa te\xF3loga"],
-        heroImage: "https://images.unsplash.com/photo-1589802829985-817e51171b92?auto=format&fit=crop&w=1200&q=80"
+        heroImage: "https://arqueologiadelperu.com/wp-content/uploads/2024/08/imagesqtbnANd9GcT0Dn0UNR4acQ88RjOb_0itTRHhNJfiuMS6SAvHlSdFC-9GQEIPKX7GpwkeVdjf.jpg"
       },
       {
         id: "victor-larco",
@@ -47394,7 +47394,7 @@ var init_geo = __esm({
         isPriority: true,
         description: "Distrito costero moderno que integra Buenos Aires, el Paseo de las Aguas y gastronom\xEDa marina de vanguardia.",
         highlights: ["Paseo de las Aguas", "Plaza de Armas de Vista Alegre", "Restaurantes de autor"],
-        heroImage: "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&q=80"
+        heroImage: "https://munivictorlarco.gob.pe/turismo/wp-content/uploads/2019/08/4327e98423c53b9d091ee208525bc9c9-300x225.jpg"
       },
       {
         id: "la-esperanza",
@@ -47548,7 +47548,7 @@ function calculateStringSimilarity(str1, str2) {
 }
 function getPlaceRepository() {
   if (!placeRepositoryInstance) {
-    if (process.env.NODE_ENV === "production") {
+    if (process.env.NODE_ENV === "production" && process.env.DATABASE_URL) {
       throw new Error(
         "[Storage Architecture] FATAL: Place repository is not initialized with PostgreSQL in production environment."
       );
@@ -48065,10 +48065,11 @@ var init_memoryCreatorsRepository = __esm({
       constructor() {
         this.users = /* @__PURE__ */ new Map();
         this.creatorProfiles = /* @__PURE__ */ new Map();
-        // key: userId
+        // key: creatorProfileId
         this.videoSubmissions = /* @__PURE__ */ new Map();
         this.videoPlaces = /* @__PURE__ */ new Map();
         this.moderationLogs = [];
+        this.creatorAuditLogs = [];
         this.savedVideos = /* @__PURE__ */ new Map();
       }
       // key: `${userId}_${videoId}`
@@ -48122,6 +48123,9 @@ var init_memoryCreatorsRepository = __esm({
         return null;
       }
       async createSubmission(data, placeIds = [], primaryPlaceId, audit) {
+        if (data.creatorProfileId && !this.creatorProfiles.has(data.creatorProfileId)) {
+          throw new Error("El perfil del creador no existe");
+        }
         const id = `vid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const now = (/* @__PURE__ */ new Date()).toISOString();
         const submission = {
@@ -48174,6 +48178,9 @@ var init_memoryCreatorsRepository = __esm({
       async updateSubmission(id, data, placeIds, primaryPlaceId, audit) {
         const sub = this.videoSubmissions.get(id);
         if (!sub) return null;
+        if (data.creatorProfileId !== void 0 && data.creatorProfileId !== null && !this.creatorProfiles.has(data.creatorProfileId)) {
+          throw new Error("El perfil del creador no existe");
+        }
         if (placeIds !== void 0) {
           const uniqueIds = Array.from(new Set(placeIds));
           if (primaryPlaceId !== void 0 && primaryPlaceId !== null) {
@@ -48320,13 +48327,17 @@ var init_memoryCreatorsRepository = __esm({
         const videosWithPlaces = await Promise.all(
           paginated.map(async (v) => {
             const places = await this.getPlacesForVideo(v.id);
-            const creatorProfile = v.creatorProfileId ? Array.from(this.creatorProfiles.values()).find((cp) => cp.id === v.creatorProfileId) : this.creatorProfiles.get(v.userId) || null;
+            const creatorProfile = v.creatorProfileId ? this.creatorProfiles.get(v.creatorProfileId) || null : v.userId ? Array.from(this.creatorProfiles.values()).find((cp) => cp.userId === v.userId) || null : null;
             const user = this.users.get(v.userId);
             return {
               ...v,
               creatorDisplayName: creatorProfile?.displayName || null,
               creatorHandle: creatorProfile?.handle || null,
               creatorAvatarUrl: creatorProfile?.avatarUrl || null,
+              tiktokFollowers: creatorProfile?.tiktokFollowers ?? null,
+              instagramFollowers: creatorProfile?.instagramFollowers ?? null,
+              youtubeSubscribers: creatorProfile?.youtubeSubscribers ?? null,
+              audienceUpdatedAt: creatorProfile?.audienceUpdatedAt ?? null,
               externalCreatorHandle: v.externalCreatorHandle || v.externalMetrics?.creatorHandle || null,
               externalCreatorDisplayName: v.externalCreatorDisplayName || v.externalMetrics?.creatorDisplayName || null,
               externalCreatorAvatarUrl: v.externalCreatorAvatarUrl || v.externalMetrics?.creatorAvatarUrl || null,
@@ -48342,6 +48353,14 @@ var init_memoryCreatorsRepository = __esm({
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
         return list.map((v) => ({ ...v }));
+      }
+      async listSubmissionsByCreatorProfileId(creatorProfileId) {
+        const list = Array.from(this.videoSubmissions.values()).filter(
+          (video) => video.creatorProfileId === creatorProfileId
+        ).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        return list.map((video) => ({ ...video }));
       }
       async listModerationQueue(status = "PENDING") {
         const list = Array.from(this.videoSubmissions.values()).filter((v) => v.status === status).sort(
@@ -48388,6 +48407,41 @@ var init_memoryCreatorsRepository = __esm({
       async getModerationLogs(videoId) {
         return this.moderationLogs.filter((l) => l.videoId === videoId).map((l) => ({ ...l }));
       }
+      async getAllModerationLogs(limit = 100) {
+        return this.moderationLogs.slice(0, limit).map((l) => {
+          const v = this.videoSubmissions.get(l.videoId);
+          return {
+            ...l,
+            videoTitle: v?.title || null,
+            videoPlatform: v?.platform || null
+          };
+        });
+      }
+      async addCreatorAuditLog(entry) {
+        const id = `caudit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const record = {
+          id,
+          creatorId: entry.creatorId,
+          creatorHandle: entry.creatorHandle,
+          creatorDisplayName: entry.newData?.displayName || entry.previousData?.displayName || null,
+          adminUserId: entry.adminUserId,
+          adminName: entry.adminName,
+          action: entry.action,
+          previousData: entry.previousData || null,
+          newData: entry.newData || null,
+          changeSummary: entry.changeSummary,
+          createdAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
+        this.creatorAuditLogs.unshift(record);
+        return { ...record };
+      }
+      async getCreatorAuditLogs(creatorId, limit = 50) {
+        let list = this.creatorAuditLogs;
+        if (creatorId && creatorId !== "all") {
+          list = list.filter((l) => l.creatorId === creatorId);
+        }
+        return list.slice(0, limit).map((l) => ({ ...l }));
+      }
       async associatePlaces(videoId, placeIds, primaryPlaceId) {
         const uniquePlaceIds = Array.from(new Set(placeIds || []));
         if (primaryPlaceId && uniquePlaceIds.length > 0 && !uniquePlaceIds.includes(primaryPlaceId)) {
@@ -48415,53 +48469,122 @@ var init_memoryCreatorsRepository = __esm({
         const pIds = Array.from(this.videoPlaces.values()).filter((vp) => vp.videoId === videoId).sort((a, b) => (b.isPrimary ? 1 : 0) - (a.isPrimary ? 1 : 0)).map((vp) => vp.placeId);
         return pIds.map((id) => INITIAL_PLACES.find((p) => p.id === id)).filter((p) => p !== void 0);
       }
+      async getPlacesForVideos(videoIds) {
+        const map = {};
+        for (const id of videoIds) {
+          map[id] = await this.getPlacesForVideo(id);
+        }
+        return map;
+      }
       async getVideosForPlace(placeId) {
         const videoIds = new Set(
           Array.from(this.videoPlaces.values()).filter((vp) => vp.placeId === placeId).map((vp) => vp.videoId)
         );
-        return Array.from(this.videoSubmissions.values()).filter((v) => videoIds.has(v.id) && v.status === "APPROVED").sort(
+        const matching = Array.from(this.videoSubmissions.values()).filter((v) => videoIds.has(v.id) && v.status === "APPROVED").sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        return Promise.all(
+          matching.map(async (v) => {
+            const places = await this.getPlacesForVideo(v.id);
+            const creatorProfile = v.creatorProfileId ? this.creatorProfiles.get(v.creatorProfileId) || null : null;
+            const user = this.users.get(v.userId);
+            return {
+              ...v,
+              creatorDisplayName: creatorProfile?.displayName || null,
+              creatorHandle: creatorProfile?.handle || null,
+              creatorAvatarUrl: creatorProfile?.avatarUrl || null,
+              tiktokFollowers: creatorProfile?.tiktokFollowers ?? null,
+              instagramFollowers: creatorProfile?.instagramFollowers ?? null,
+              youtubeSubscribers: creatorProfile?.youtubeSubscribers ?? null,
+              audienceUpdatedAt: creatorProfile?.audienceUpdatedAt ?? null,
+              externalCreatorHandle: v.externalCreatorHandle || v.externalMetrics?.creatorHandle || null,
+              externalCreatorDisplayName: v.externalCreatorDisplayName || v.externalMetrics?.creatorDisplayName || null,
+              externalCreatorAvatarUrl: v.externalCreatorAvatarUrl || v.externalMetrics?.creatorAvatarUrl || null,
+              userName: user?.name || null,
+              places
+            };
+          })
         );
       }
       async findCreatorProfileByUserId(userId) {
-        const prof = this.creatorProfiles.get(userId);
-        return prof ? { ...prof } : null;
+        const profile = Array.from(this.creatorProfiles.values()).find((item) => item.userId === userId);
+        return profile ? { ...profile } : null;
+      }
+      async findCreatorProfileById(id) {
+        const profile = this.creatorProfiles.get(id);
+        return profile ? { ...profile } : null;
       }
       async findCreatorProfileByHandle(handle) {
-        const lower = handle.toLowerCase();
-        for (const prof of this.creatorProfiles.values()) {
-          if (prof.handle.toLowerCase() === lower) {
-            return { ...prof };
+        const normalizedHandle = handle.toLowerCase().trim();
+        const profile = Array.from(this.creatorProfiles.values()).find((item) => item.handle.toLowerCase() === normalizedHandle);
+        return profile ? { ...profile } : null;
+      }
+      // Crear o actualizar un perfil vinculado a una cuenta de usuario.
+      async saveCreatorProfile(data) {
+        const existing = Array.from(this.creatorProfiles.values()).find((profile2) => profile2.userId === data.userId);
+        const profile = await this.createOrUpdateProfile(
+          existing?.id ?? null,
+          data
+        );
+        return profile;
+      }
+      // Crear un perfil independiente, sin exigir una cuenta de usuario.
+      async createCreatorProfile(data) {
+        return this.createOrUpdateProfile(null, data);
+      }
+      // Actualizar un perfil existente mediante su ID.
+      async updateCreatorProfile(id, data) {
+        const existing = this.creatorProfiles.get(id);
+        if (!existing) return null;
+        return this.createOrUpdateProfile(id, {
+          ...existing,
+          ...data
+        });
+      }
+      // Método interno para centralizar validaciones y persistencia.
+      async createOrUpdateProfile(existingId, data) {
+        const normalizedHandle = data.handle.toLowerCase().trim();
+        if (!normalizedHandle) {
+          throw new Error("El handle del creador es obligatorio");
+        }
+        const duplicateHandle = Array.from(this.creatorProfiles.values()).find(
+          (profile2) => profile2.handle.toLowerCase() === normalizedHandle && profile2.id !== existingId
+        );
+        if (duplicateHandle) {
+          throw new Error("Ya existe un creador con ese handle");
+        }
+        if (data.userId) {
+          const duplicateUser = Array.from(this.creatorProfiles.values()).find(
+            (profile2) => profile2.userId === data.userId && profile2.id !== existingId
+          );
+          if (duplicateUser) {
+            throw new Error("Este usuario ya tiene un perfil de creador");
           }
         }
-        return null;
-      }
-      async saveCreatorProfile(data) {
-        const existing = this.creatorProfiles.get(data.userId);
+        const existing = existingId ? this.creatorProfiles.get(existingId) : void 0;
         const now = (/* @__PURE__ */ new Date()).toISOString();
         const profile = {
-          id: existing ? existing.id : `cp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          userId: data.userId,
-          handle: data.handle.toLowerCase().trim(),
+          id: existing?.id ?? `cp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+          userId: data.userId ?? null,
+          handle: normalizedHandle,
           displayName: data.displayName,
-          bio: data.bio || null,
-          avatarUrl: data.avatarUrl || null,
+          bio: data.bio ?? null,
+          avatarUrl: data.avatarUrl ?? null,
           primaryPlatform: data.primaryPlatform,
-          tiktokUrl: data.tiktokUrl || null,
-          instagramUrl: data.instagramUrl || null,
-          youtubeUrl: data.youtubeUrl || null,
+          tiktokUrl: data.tiktokUrl ?? null,
+          instagramUrl: data.instagramUrl ?? null,
+          youtubeUrl: data.youtubeUrl ?? null,
+          tiktokFollowers: data.tiktokFollowers ?? null,
+          instagramFollowers: data.instagramFollowers ?? null,
+          youtubeSubscribers: data.youtubeSubscribers ?? null,
+          audienceUpdatedAt: data.audienceUpdatedAt ?? null,
           isPublic: data.isPublic,
-          isVerified: data.isVerified !== void 0 ? data.isVerified : existing ? existing.isVerified : false,
-          totalApprovedVideos: existing ? existing.totalApprovedVideos : 0,
-          createdAt: existing ? existing.createdAt : now,
+          isVerified: data.isVerified ?? existing?.isVerified ?? false,
+          totalApprovedVideos: existing?.totalApprovedVideos ?? 0,
+          createdAt: existing?.createdAt ?? now,
           updatedAt: now
         };
-        this.creatorProfiles.set(data.userId, profile);
-        for (const sub of this.videoSubmissions.values()) {
-          if (sub.userId === data.userId && !sub.creatorProfileId) {
-            sub.creatorProfileId = profile.id;
-          }
-        }
+        this.creatorProfiles.set(profile.id, profile);
         return { ...profile };
       }
       async listPublicCreators() {
@@ -48477,25 +48600,52 @@ var init_memoryCreatorsRepository = __esm({
         }
       }
       async toggleSaveVideo(userId, videoId) {
-        const key = `${userId}_${videoId}`;
         const sub = this.videoSubmissions.get(videoId);
+        if (!sub) {
+          throw new Error("Video no encontrado");
+        }
+        const key = `${userId}_${videoId}`;
+        let isSaved;
         if (this.savedVideos.has(key)) {
           this.savedVideos.delete(key);
-          if (sub) sub.internalSavesCount = Math.max(0, sub.internalSavesCount - 1);
-          return { saved: false };
+          isSaved = false;
         } else {
           this.savedVideos.set(key, {
-            id: `sv_${Date.now()}`,
+            id: `sv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
             userId,
             videoId,
             savedAt: (/* @__PURE__ */ new Date()).toISOString()
           });
-          if (sub) sub.internalSavesCount += 1;
-          return { saved: true };
+          isSaved = true;
         }
+        let actualCount = 0;
+        for (const sv of this.savedVideos.values()) {
+          if (sv.videoId === videoId) actualCount++;
+        }
+        sub.internalSavesCount = actualCount;
+        return { saved: isSaved };
       }
       async isSavedByUser(userId, videoId) {
         return this.savedVideos.has(`${userId}_${videoId}`);
+      }
+      async listSavedVideosByUser(userId) {
+        const userSaved = Array.from(this.savedVideos.values()).filter((sv) => sv.userId === userId).sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+        const result = [];
+        for (const sv of userSaved) {
+          const sub = this.videoSubmissions.get(sv.videoId);
+          if (sub && sub.status === "APPROVED") {
+            const places = await this.getPlacesForVideo(sub.id);
+            const creatorProfile = sub.creatorProfileId ? this.creatorProfiles.get(sub.creatorProfileId) || null : null;
+            result.push({
+              ...sub,
+              creatorDisplayName: creatorProfile?.displayName || null,
+              creatorHandle: creatorProfile?.handle || null,
+              creatorAvatarUrl: creatorProfile?.avatarUrl || null,
+              places
+            });
+          }
+        }
+        return result;
       }
       async getAdminMetrics() {
         const subs = Array.from(this.videoSubmissions.values());
@@ -48513,6 +48663,7 @@ var init_memoryCreatorsRepository = __esm({
       }
       async close() {
         this.users.clear();
+        this.creatorProfiles.clear();
         this.videoSubmissions.clear();
         this.videoPlaces.clear();
         this.savedVideos.clear();
@@ -48579,6 +48730,8 @@ function parseModerationLogRow(row) {
     reason: row.reason || null,
     internalNotes: cleanNotes,
     changedFields,
+    videoTitle: row.videoTitle || null,
+    videoPlatform: row.videoPlatform || null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt)
   };
 }
@@ -48608,6 +48761,7 @@ var init_postgresCreatorsRepository = __esm({
     AUDIT_META_SUFFIX = ":__AUDIT_END__";
     PostgresCreatorsRepository = class {
       constructor(connectionString) {
+        this.creatorAuditBuffer = [];
         this.pool = new Pool({
           connectionString,
           ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : void 0,
@@ -49086,6 +49240,21 @@ var init_postgresCreatorsRepository = __esm({
         );
         return res.rows.map(mapVideoSubmissionRow);
       }
+      async listSubmissionsByCreatorProfileId(creatorProfileId) {
+        const res = await this.pool.query(
+          `SELECT id, user_id as "userId", creator_profile_id as "creatorProfileId", platform, external_video_id as "externalVideoId",
+              video_url as "videoUrl", embed_url as "embedUrl", thumbnail_url as "thumbnailUrl", title, description,
+              content_type as "contentType", category, locality_id as "localityId", status, moderation_notes as "moderationNotes",
+              moderated_by as "moderatedBy", moderated_at as "moderatedAt", internal_views_count as "internalViewsCount",
+              internal_saves_count as "internalSavesCount", external_metrics as "externalMetrics",
+              created_at as "createdAt", updated_at as "updatedAt"
+       FROM video_submissions
+       WHERE creator_profile_id = $1
+       ORDER BY created_at DESC`,
+          [creatorProfileId]
+        );
+        return res.rows.map(mapVideoSubmissionRow);
+      }
       async listModerationQueue(status = "PENDING") {
         const res = await this.pool.query(
           `SELECT id, user_id as "userId", creator_profile_id as "creatorProfileId", platform, external_video_id as "externalVideoId",
@@ -49145,6 +49314,105 @@ var init_postgresCreatorsRepository = __esm({
         );
         return res.rows.map(parseModerationLogRow);
       }
+      async getAllModerationLogs(limit = 100) {
+        const res = await this.pool.query(
+          `SELECT vml.id, vml.video_id as "videoId", vml.admin_user_id as "adminUserId", vml.admin_name as "adminName",
+              vml.previous_status as "previousStatus", vml.new_status as "newStatus", vml.reason, vml.internal_notes as "internalNotes",
+              vml.created_at as "createdAt",
+              vs.title as "videoTitle", vs.platform as "videoPlatform"
+       FROM video_moderation_logs vml
+       LEFT JOIN video_submissions vs ON vs.id = vml.video_id
+       ORDER BY vml.created_at DESC
+       LIMIT $1`,
+          [limit]
+        );
+        return res.rows.map(parseModerationLogRow);
+      }
+      async addCreatorAuditLog(entry) {
+        const id = `caudit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        const record = {
+          id,
+          creatorId: entry.creatorId,
+          creatorHandle: entry.creatorHandle,
+          creatorDisplayName: entry.newData?.displayName || entry.previousData?.displayName || null,
+          adminUserId: entry.adminUserId,
+          adminName: entry.adminName,
+          action: entry.action,
+          previousData: entry.previousData || null,
+          newData: entry.newData || null,
+          changeSummary: entry.changeSummary,
+          createdAt: now
+        };
+        try {
+          await this.pool.query(
+            `INSERT INTO creator_audit_logs (
+          id, creator_id, admin_user_id, admin_name, action,
+          previous_data, new_data, change_summary, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              id,
+              entry.creatorId,
+              entry.adminUserId,
+              entry.adminName,
+              entry.action,
+              entry.previousData ? JSON.stringify(entry.previousData) : null,
+              entry.newData ? JSON.stringify(entry.newData) : null,
+              entry.changeSummary,
+              now
+            ]
+          );
+        } catch {
+          this.creatorAuditBuffer.unshift(record);
+          if (this.creatorAuditBuffer.length > 500) this.creatorAuditBuffer.pop();
+        }
+        return record;
+      }
+      async getCreatorAuditLogs(creatorId, limit = 50) {
+        try {
+          const query = creatorId && creatorId !== "all" ? `SELECT cal.id, cal.creator_id as "creatorId", cal.admin_user_id as "adminUserId", cal.admin_name as "adminName",
+                    cal.action, cal.previous_data as "previousData", cal.new_data as "newData",
+                    cal.change_summary as "changeSummary", cal.created_at as "createdAt",
+                    COALESCE(cp.handle, '') as "creatorHandle",
+                    COALESCE(cp.display_name, '') as "creatorDisplayName"
+             FROM creator_audit_logs cal
+             LEFT JOIN creator_profiles cp ON cp.id = cal.creator_id
+             WHERE cal.creator_id = $1
+             ORDER BY cal.created_at DESC LIMIT $2` : `SELECT cal.id, cal.creator_id as "creatorId", cal.admin_user_id as "adminUserId", cal.admin_name as "adminName",
+                    cal.action, cal.previous_data as "previousData", cal.new_data as "newData",
+                    cal.change_summary as "changeSummary", cal.created_at as "createdAt",
+                    COALESCE(cp.handle, '') as "creatorHandle",
+                    COALESCE(cp.display_name, '') as "creatorDisplayName"
+             FROM creator_audit_logs cal
+             LEFT JOIN creator_profiles cp ON cp.id = cal.creator_id
+             ORDER BY cal.created_at DESC LIMIT $1`;
+          const params = creatorId && creatorId !== "all" ? [creatorId, limit] : [limit];
+          const res = await this.pool.query(query, params);
+          return res.rows.map((r) => {
+            const handle = r.creatorHandle || r.newData?.handle || r.previousData?.handle || "";
+            const displayName = r.creatorDisplayName || r.newData?.displayName || r.previousData?.displayName || null;
+            return {
+              id: r.id,
+              creatorId: r.creatorId,
+              creatorHandle: handle,
+              creatorDisplayName: displayName,
+              adminUserId: r.adminUserId,
+              adminName: r.adminName,
+              action: r.action,
+              previousData: r.previousData,
+              newData: r.newData,
+              changeSummary: r.changeSummary,
+              createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : (/* @__PURE__ */ new Date()).toISOString()
+            };
+          });
+        } catch {
+          let filtered = this.creatorAuditBuffer;
+          if (creatorId && creatorId !== "all") {
+            filtered = filtered.filter((l) => l.creatorId === creatorId);
+          }
+          return filtered.slice(0, limit);
+        }
+      }
       async associatePlaces(videoId, placeIds, primaryPlaceId) {
         const uniquePlaceIds = Array.from(new Set(placeIds || []));
         if (primaryPlaceId && uniquePlaceIds.length > 0 && !uniquePlaceIds.includes(primaryPlaceId)) {
@@ -49181,6 +49449,24 @@ var init_postgresCreatorsRepository = __esm({
         const placeIds = res.rows.map((r) => r.placeId);
         return placeIds.map((id) => INITIAL_PLACES.find((p) => p.id === id)).filter((p) => p !== void 0);
       }
+      async getPlacesForVideos(videoIds) {
+        const map = {};
+        if (!videoIds || videoIds.length === 0) return map;
+        for (const id of videoIds) {
+          map[id] = [];
+        }
+        const res = await this.pool.query(
+          `SELECT video_id as "videoId", place_id as "placeId" FROM video_places WHERE video_id = ANY($1::text[]) ORDER BY is_primary DESC, created_at ASC`,
+          [videoIds]
+        );
+        for (const r of res.rows) {
+          const place = INITIAL_PLACES.find((p) => p.id === r.placeId);
+          if (place && map[r.videoId]) {
+            map[r.videoId].push(place);
+          }
+        }
+        return map;
+      }
       async getVideosForPlace(placeId) {
         const res = await this.pool.query(
           `SELECT vs.id, vs.user_id as "userId", vs.creator_profile_id as "creatorProfileId", vs.platform,
@@ -49189,9 +49475,15 @@ var init_postgresCreatorsRepository = __esm({
               vs.category, vs.locality_id as "localityId", vs.status, vs.moderation_notes as "moderationNotes",
               vs.moderated_by as "moderatedBy", vs.moderated_at as "moderatedAt", vs.internal_views_count as "internalViewsCount",
               vs.internal_saves_count as "internalSavesCount", vs.external_metrics as "externalMetrics",
-              vs.created_at as "createdAt", vs.updated_at as "updatedAt"
+              vs.created_at as "createdAt", vs.updated_at as "updatedAt",
+              cp.display_name as "creatorDisplayName",
+              cp.handle as "creatorHandle",
+              cp.avatar_url as "creatorAvatarUrl",
+              u.name as "userName"
        FROM video_submissions vs
        INNER JOIN video_places vp ON vp.video_id = vs.id
+       LEFT JOIN creator_profiles cp ON cp.id = vs.creator_profile_id
+       LEFT JOIN users u ON u.id = vs.user_id
        WHERE vp.place_id = $1 AND vs.status = 'APPROVED'
        ORDER BY vs.created_at DESC`,
           [placeId]
@@ -49200,34 +49492,76 @@ var init_postgresCreatorsRepository = __esm({
       }
       async findCreatorProfileByUserId(userId) {
         const res = await this.pool.query(
-          `SELECT id, user_id as "userId", handle, display_name as "displayName", bio, avatar_url as "avatarUrl",
-              primary_platform as "primaryPlatform", tiktok_url as "tiktokUrl", instagram_url as "instagramUrl",
-              youtube_url as "youtubeUrl", is_public as "isPublic", is_verified as "isVerified",
-              total_approved_videos as "totalApprovedVideos", created_at as "createdAt", updated_at as "updatedAt"
-       FROM creator_profiles WHERE user_id = $1 LIMIT 1`,
+          `SELECT id, user_id as "userId", handle, display_name as "displayName",
+              bio, avatar_url as "avatarUrl",
+              primary_platform as "primaryPlatform",
+              tiktok_url as "tiktokUrl",
+              instagram_url as "instagramUrl",
+              youtube_url as "youtubeUrl",
+              is_public as "isPublic",
+              is_verified as "isVerified",
+              total_approved_videos as "totalApprovedVideos",
+              created_at as "createdAt",
+              updated_at as "updatedAt"
+       FROM creator_profiles
+       WHERE user_id = $1
+       LIMIT 1`,
           [userId]
+        );
+        return res.rows[0] || null;
+      }
+      async findCreatorProfileById(id) {
+        const res = await this.pool.query(
+          `SELECT id, user_id as "userId", handle, display_name as "displayName",
+              bio, avatar_url as "avatarUrl",
+              primary_platform as "primaryPlatform",
+              tiktok_url as "tiktokUrl",
+              instagram_url as "instagramUrl",
+              youtube_url as "youtubeUrl",
+              is_public as "isPublic",
+              is_verified as "isVerified",
+              total_approved_videos as "totalApprovedVideos",
+              created_at as "createdAt",
+              updated_at as "updatedAt"
+       FROM creator_profiles
+       WHERE id = $1
+       LIMIT 1`,
+          [id]
         );
         return res.rows[0] || null;
       }
       async findCreatorProfileByHandle(handle) {
         const res = await this.pool.query(
-          `SELECT id, user_id as "userId", handle, display_name as "displayName", bio, avatar_url as "avatarUrl",
-              primary_platform as "primaryPlatform", tiktok_url as "tiktokUrl", instagram_url as "instagramUrl",
-              youtube_url as "youtubeUrl", is_public as "isPublic", is_verified as "isVerified",
-              total_approved_videos as "totalApprovedVideos", created_at as "createdAt", updated_at as "updatedAt"
-       FROM creator_profiles WHERE LOWER(handle) = LOWER($1) LIMIT 1`,
+          `SELECT id, user_id as "userId", handle, display_name as "displayName",
+              bio, avatar_url as "avatarUrl",
+              primary_platform as "primaryPlatform",
+              tiktok_url as "tiktokUrl",
+              instagram_url as "instagramUrl",
+              youtube_url as "youtubeUrl",
+              is_public as "isPublic",
+              is_verified as "isVerified",
+              total_approved_videos as "totalApprovedVideos",
+              created_at as "createdAt",
+              updated_at as "updatedAt"
+       FROM creator_profiles
+       WHERE LOWER(handle) = LOWER($1)
+       LIMIT 1`,
           [handle]
         );
         return res.rows[0] || null;
       }
+      // Mantiene la compatibilidad con perfiles vinculados a una cuenta.
       async saveCreatorProfile(data) {
-        const id = `cp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const id = `cp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         const res = await this.pool.query(
           `INSERT INTO creator_profiles (
-        id, user_id, handle, display_name, bio, avatar_url, primary_platform,
-        tiktok_url, instagram_url, youtube_url, is_public
-      ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT (user_id) DO UPDATE SET
+        id, user_id, handle, display_name, bio, avatar_url,
+        primary_platform, tiktok_url, instagram_url, youtube_url,
+        is_public, is_verified
+      )
+      VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      ON CONFLICT (user_id) WHERE user_id IS NOT NULL
+      DO UPDATE SET
         handle = EXCLUDED.handle,
         display_name = EXCLUDED.display_name,
         bio = EXCLUDED.bio,
@@ -49237,26 +49571,126 @@ var init_postgresCreatorsRepository = __esm({
         instagram_url = EXCLUDED.instagram_url,
         youtube_url = EXCLUDED.youtube_url,
         is_public = EXCLUDED.is_public,
+        is_verified = EXCLUDED.is_verified,
         updated_at = NOW()
-      RETURNING id, user_id as "userId", handle, display_name as "displayName", bio, avatar_url as "avatarUrl",
-                primary_platform as "primaryPlatform", tiktok_url as "tiktokUrl", instagram_url as "instagramUrl",
-                youtube_url as "youtubeUrl", is_public as "isPublic", is_verified as "isVerified",
-                total_approved_videos as "totalApprovedVideos", created_at as "createdAt", updated_at as "updatedAt"`,
+      RETURNING id, user_id as "userId", handle,
+                display_name as "displayName", bio,
+                avatar_url as "avatarUrl",
+                primary_platform as "primaryPlatform",
+                tiktok_url as "tiktokUrl",
+                instagram_url as "instagramUrl",
+                youtube_url as "youtubeUrl",
+                is_public as "isPublic",
+                is_verified as "isVerified",
+                total_approved_videos as "totalApprovedVideos",
+                created_at as "createdAt",
+                updated_at as "updatedAt"`,
           [
             id,
             data.userId,
-            data.handle,
+            data.handle.trim(),
             data.displayName,
-            data.bio || null,
-            data.avatarUrl || null,
+            data.bio ?? null,
+            data.avatarUrl ?? null,
             data.primaryPlatform,
-            data.tiktokUrl || null,
-            data.instagramUrl || null,
-            data.youtubeUrl || null,
-            data.isPublic
+            data.tiktokUrl ?? null,
+            data.instagramUrl ?? null,
+            data.youtubeUrl ?? null,
+            data.isPublic,
+            data.isVerified ?? false
           ]
         );
         return res.rows[0];
+      }
+      // Crea un creador independiente, sin cuenta de usuario obligatoria.
+      async createCreatorProfile(data) {
+        const id = `cp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const res = await this.pool.query(
+          `INSERT INTO creator_profiles (
+        id, user_id, handle, display_name, bio, avatar_url,
+        primary_platform, tiktok_url, instagram_url, youtube_url,
+        is_public, is_verified
+      )
+      VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING id, user_id as "userId", handle,
+                display_name as "displayName", bio,
+                avatar_url as "avatarUrl",
+                primary_platform as "primaryPlatform",
+                tiktok_url as "tiktokUrl",
+                instagram_url as "instagramUrl",
+                youtube_url as "youtubeUrl",
+                is_public as "isPublic",
+                is_verified as "isVerified",
+                total_approved_videos as "totalApprovedVideos",
+                created_at as "createdAt",
+                updated_at as "updatedAt"`,
+          [
+            id,
+            data.userId ?? null,
+            data.handle.trim(),
+            data.displayName,
+            data.bio ?? null,
+            data.avatarUrl ?? null,
+            data.primaryPlatform,
+            data.tiktokUrl ?? null,
+            data.instagramUrl ?? null,
+            data.youtubeUrl ?? null,
+            data.isPublic,
+            data.isVerified ?? false
+          ]
+        );
+        return res.rows[0];
+      }
+      // Actualiza un creador por su ID, nunca por el usuario administrador.
+      async updateCreatorProfile(id, data) {
+        const columnMap = {
+          userId: "user_id",
+          handle: "handle",
+          displayName: "display_name",
+          bio: "bio",
+          avatarUrl: "avatar_url",
+          primaryPlatform: "primary_platform",
+          tiktokUrl: "tiktok_url",
+          instagramUrl: "instagram_url",
+          youtubeUrl: "youtube_url",
+          isPublic: "is_public",
+          isVerified: "is_verified"
+        };
+        const params = [];
+        const setClauses = [];
+        for (const [key, value] of Object.entries(data)) {
+          if (value === void 0) continue;
+          const column = columnMap[key];
+          if (!column) continue;
+          params.push(
+            key === "handle" && typeof value === "string" ? value.trim().toLowerCase() : value
+          );
+          setClauses.push(`${column} = $${params.length}`);
+        }
+        if (setClauses.length === 0) {
+          return this.findCreatorProfileById(id);
+        }
+        setClauses.push("updated_at = NOW()");
+        params.push(id);
+        const res = await this.pool.query(
+          `UPDATE creator_profiles
+       SET ${setClauses.join(", ")}
+       WHERE id = $${params.length}
+       RETURNING id, user_id as "userId", handle,
+                 display_name as "displayName", bio,
+                 avatar_url as "avatarUrl",
+                 primary_platform as "primaryPlatform",
+                 tiktok_url as "tiktokUrl",
+                 instagram_url as "instagramUrl",
+                 youtube_url as "youtubeUrl",
+                 is_public as "isPublic",
+                 is_verified as "isVerified",
+                 total_approved_videos as "totalApprovedVideos",
+                 created_at as "createdAt",
+                 updated_at as "updatedAt"`,
+          params
+        );
+        return res.rows[0] || null;
       }
       async listPublicCreators() {
         const res = await this.pool.query(
@@ -49288,25 +49722,47 @@ var init_postgresCreatorsRepository = __esm({
         );
       }
       async toggleSaveVideo(userId, videoId) {
-        const existing = await this.pool.query(
-          `SELECT id FROM saved_videos WHERE user_id = $1 AND video_id = $2`,
-          [userId, videoId]
-        );
-        if (existing.rows.length > 0) {
-          await this.pool.query(`DELETE FROM saved_videos WHERE user_id = $1 AND video_id = $2`, [userId, videoId]);
-          await this.pool.query(
-            `UPDATE video_submissions SET internal_saves_count = GREATEST(0, internal_saves_count - 1) WHERE id = $1`,
+        const client = await this.pool.connect();
+        try {
+          await client.query("BEGIN");
+          const videoCheck = await client.query(
+            `SELECT id, status FROM video_submissions WHERE id = $1 FOR UPDATE`,
             [videoId]
           );
-          return { saved: false };
-        } else {
-          const svId = `sv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-          await this.pool.query(`INSERT INTO saved_videos (id, user_id, video_id) VALUES ($1, $2, $3)`, [svId, userId, videoId]);
-          await this.pool.query(
-            `UPDATE video_submissions SET internal_saves_count = internal_saves_count + 1 WHERE id = $1`,
+          if (videoCheck.rows.length === 0) {
+            await client.query("ROLLBACK");
+            throw new Error("Video no encontrado");
+          }
+          const existing = await client.query(
+            `SELECT id FROM saved_videos WHERE user_id = $1 AND video_id = $2 FOR UPDATE`,
+            [userId, videoId]
+          );
+          let isSaved;
+          if (existing.rows.length > 0) {
+            await client.query(`DELETE FROM saved_videos WHERE user_id = $1 AND video_id = $2`, [userId, videoId]);
+            isSaved = false;
+          } else {
+            const svId = `sv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+            await client.query(
+              `INSERT INTO saved_videos (id, user_id, video_id) VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, video_id) DO NOTHING`,
+              [svId, userId, videoId]
+            );
+            isSaved = true;
+          }
+          await client.query(
+            `UPDATE video_submissions 
+         SET internal_saves_count = (SELECT COUNT(*)::int FROM saved_videos WHERE video_id = $1)
+         WHERE id = $1`,
             [videoId]
           );
-          return { saved: true };
+          await client.query("COMMIT");
+          return { saved: isSaved };
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw err;
+        } finally {
+          client.release();
         }
       }
       async isSavedByUser(userId, videoId) {
@@ -49315,6 +49771,51 @@ var init_postgresCreatorsRepository = __esm({
           [userId, videoId]
         );
         return res.rows.length > 0;
+      }
+      async listSavedVideosByUser(userId) {
+        const res = await this.pool.query(
+          `SELECT vs.id, vs.user_id as "userId", vs.creator_profile_id as "creatorProfileId", vs.platform,
+              vs.external_video_id as "externalVideoId", vs.video_url as "videoUrl", vs.embed_url as "embedUrl",
+              vs.thumbnail_url as "thumbnailUrl", vs.title, vs.description, vs.content_type as "contentType",
+              vs.category, vs.locality_id as "localityId", vs.status,
+              vs.internal_views_count as "internalViewsCount",
+              vs.internal_saves_count as "internalSavesCount", vs.external_metrics as "externalMetrics",
+              vs.created_at as "createdAt", vs.updated_at as "updatedAt",
+              cp.display_name as "creatorDisplayName",
+              cp.handle as "creatorHandle",
+              cp.avatar_url as "creatorAvatarUrl"
+       FROM saved_videos sv
+       INNER JOIN video_submissions vs ON vs.id = sv.video_id
+       LEFT JOIN creator_profiles cp ON cp.id = vs.creator_profile_id
+       WHERE sv.user_id = $1 AND vs.status = 'APPROVED'
+       ORDER BY sv.saved_at DESC`,
+          [userId]
+        );
+        if (res.rows.length === 0) {
+          return [];
+        }
+        const videoIds = res.rows.map((r) => r.id);
+        const placesRes = await this.pool.query(
+          `SELECT video_id as "videoId", place_id as "placeId", is_primary as "isPrimary"
+       FROM video_places
+       WHERE video_id = ANY($1)
+       ORDER BY is_primary DESC`,
+          [videoIds]
+        );
+        const placesByVideoId = {};
+        for (const row of placesRes.rows) {
+          const place = INITIAL_PLACES.find((p) => p.id === row.placeId);
+          if (place) {
+            if (!placesByVideoId[row.videoId]) {
+              placesByVideoId[row.videoId] = [];
+            }
+            placesByVideoId[row.videoId].push(place);
+          }
+        }
+        return res.rows.map((row) => ({
+          ...mapVideoSubmissionRow(row),
+          places: placesByVideoId[row.id] || []
+        }));
       }
       async getAdminMetrics() {
         const res = await this.pool.query(`
@@ -50527,13 +51028,13 @@ function initializeRepositories() {
       };
     }
   }
-  if (isProduction2) {
+  if (isProduction2 && databaseUrl) {
     throw new Error(
       "[Storage Architecture] FATAL: Silent in-memory fallback is strictly forbidden in production. DATABASE_URL must be configured."
     );
   }
   console.log(
-    "[Storage Architecture] DATABASE_URL is not set. Operating in development In-Memory Adapter. All interfaces match PostgreSQL 1:1."
+    "[Storage Architecture] DATABASE_URL is not set. Operating with In-Memory Adapter. All interfaces match PostgreSQL 1:1."
   );
   setPlaceRepositoryInstance(new PlaceRepository());
   const memoryAdapter = new MemoryCreatorsRepository();
@@ -50859,11 +51360,11 @@ var init_geminiService = __esm({
 
 // server.ts
 import "dotenv/config";
-import fs from "fs";
-import express from "express";
+import fs2 from "fs";
+import express2 from "express";
 import { createServer as createViteServer } from "vite";
-import path from "path";
-import { fileURLToPath } from "url";
+import path2 from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/server/routes.ts
 import { Router as Router4 } from "express";
@@ -51169,6 +51670,61 @@ function calculateTripDuration(startDateStr, endDateStr) {
     isValid: true
   };
 }
+var DEFAULT_FLEXIBLE_DAYS = 3;
+function calculateOptionalTripDates(startDateStr, endDateStr) {
+  const start = (startDateStr || "").trim();
+  const end = (endDateStr || "").trim();
+  if (!start && !end) {
+    return {
+      days: DEFAULT_FLEXIBLE_DAYS,
+      nights: DEFAULT_FLEXIBLE_DAYS - 1,
+      hasDates: false,
+      startDate: "",
+      endDate: "",
+      isValid: true
+    };
+  }
+  if (start && !end) {
+    const startParts = parseDateParts(start);
+    if (!startParts || !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+      return {
+        days: 0,
+        nights: 0,
+        hasDates: false,
+        startDate: start,
+        endDate: "",
+        isValid: false,
+        error: "Formato de fecha inv\xE1lido"
+      };
+    }
+    return {
+      days: 1,
+      nights: 0,
+      hasDates: true,
+      startDate: start,
+      endDate: start,
+      isValid: true
+    };
+  }
+  if (!start && end) {
+    return {
+      days: 0,
+      nights: 0,
+      hasDates: false,
+      startDate: "",
+      endDate: end,
+      isValid: false,
+      error: "Ingresa tambi\xE9n la fecha de inicio o deja ambas fechas vac\xEDas"
+    };
+  }
+  const duration = calculateTripDuration(start, end);
+  return {
+    ...duration,
+    hasDates: duration.isValid,
+    startDate: start,
+    endDate: end
+  };
+}
 
 // src/server/repository.ts
 init_placeRepository();
@@ -51215,7 +51771,7 @@ var CatalogRepository = class {
     if (!locality) {
       return { error: "Destino no encontrado en el cat\xE1logo de La Libertad" };
     }
-    const duration = calculateTripDuration(params.startDate, params.endDate);
+    const duration = calculateOptionalTripDates(params.startDate, params.endDate);
     if (!duration.isValid) {
       return { error: duration.error || "Fechas de viaje inv\xE1lidas" };
     }
@@ -51226,8 +51782,8 @@ var CatalogRepository = class {
       title,
       destinationId: locality.id,
       destinationName: locality.name,
-      startDate: params.startDate,
-      endDate: params.endDate,
+      startDate: duration.startDate,
+      endDate: duration.endDate,
       totalDays: duration.days,
       totalNights: duration.nights,
       coverImage: locality.heroImage,
@@ -51486,20 +52042,27 @@ var INITIAL_EVENTS = [
 // src/server/schemas.ts
 init_geoBoundary();
 import { z } from "zod";
+var optionalDateField = z.string().trim().refine(
+  (val) => val === "" || /^\d{4}-\d{2}-\d{2}$/.test(val),
+  { message: "La fecha debe tener formato AAAA-MM-DD" }
+).optional().default("");
 var CreateTripSchema = z.object({
   destinationId: z.string().refine(
     (id) => validateLocalityId(id),
     { message: "El destino debe ser una localidad v\xE1lida dentro de la regi\xF3n La Libertad, Per\xFA" }
   ),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha de llegada debe tener formato AAAA-MM-DD"),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha de salida debe tener formato AAAA-MM-DD"),
+  startDate: optionalDateField,
+  endDate: optionalDateField,
   title: z.string().optional()
-}).refine((data) => {
-  const duration = calculateTripDuration(data.startDate, data.endDate);
-  return duration.isValid;
-}, {
-  message: "La fecha de salida no puede ser anterior a la de llegada",
-  path: ["endDate"]
+}).superRefine((data, ctx) => {
+  const result = calculateOptionalTripDates(data.startDate, data.endDate);
+  if (!result.isValid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: result.error || "Fechas de viaje inv\xE1lidas",
+      path: ["endDate"]
+    });
+  }
 });
 
 // src/server/authRoutes.ts
@@ -51578,16 +52141,16 @@ function parseAndValidateVideoUrl(rawUrl) {
         }
       };
     }
-    if (hostname === "vt.tiktok.com" || hostname === "vm.tiktok.com") {
-      const shortCode = pathname.replace(/^\/+/, "").split("/")[0];
+    if (hostname === "vt.tiktok.com" || hostname === "vm.tiktok.com" || hostname === "tiktok.com" && pathname.startsWith("/t/")) {
+      const shortCode = pathname.replace(/^\/+t\/?|^\/+/, "").split("/")[0].split("?")[0];
       if (/^[a-zA-Z0-9_-]{5,15}$/.test(shortCode)) {
         return {
           isValid: true,
           data: {
             platform: "tiktok",
             externalVideoId: `short_${shortCode}`,
-            canonicalUrl: `https://${hostname}/${shortCode}`,
-            embedUrl: `https://www.tiktok.com/embed/v2/short_${shortCode}`
+            canonicalUrl: hostname === "tiktok.com" ? `https://www.tiktok.com/t/${shortCode}` : `https://${hostname}/${shortCode}`,
+            embedUrl: `https://www.tiktok.com/player/v1/${shortCode}?music_info=1&description=1&autoplay=0`
           }
         };
       }
@@ -51624,26 +52187,62 @@ function parseAndValidateVideoUrl(rawUrl) {
 
 // src/server/creatorsSchemas.ts
 var validLocalityIds = new Set(LA_LIBERTAD_LOCALITIES.map((l) => l.id));
+var safeUrlSchema = z2.string().trim().min(1, "La URL no puede estar vac\xEDa").max(500, "La URL no puede exceder 500 caracteres").refine(
+  (u) => {
+    if (u.startsWith("/uploads/")) {
+      return !u.includes("..") && /^\/uploads\/[a-zA-Z0-9_\-\.\/]+$/.test(u);
+    }
+    try {
+      const parsed = new URL(u);
+      return parsed.protocol === "https:" || parsed.protocol === "http:";
+    } catch {
+      return false;
+    }
+  },
+  {
+    message: "Debe ser una URL v\xE1lida (HTTP/HTTPS) o una ruta de subida (/uploads/...)"
+  }
+);
+var optionalUrlOrEmptySchema = safeUrlSchema.or(z2.literal("")).optional().nullable();
 var RegisterUserSchema = z2.object({
-  email: z2.string().trim().toLowerCase().email("El correo electr\xF3nico no es v\xE1lido"),
-  password: z2.string().min(8, "La contrase\xF1a debe contener al menos 8 caracteres").max(100, "La contrase\xF1a no puede exceder 100 caracteres"),
+  email: z2.string().trim().toLowerCase().max(255, "El correo electr\xF3nico no puede exceder 255 caracteres").email("El correo electr\xF3nico no es v\xE1lido"),
+  password: z2.string().min(8, "La contrase\xF1a debe contener al menos 8 caracteres").max(100, "La contrase\xF1a no puede exceder 100 caracteres").refine((p) => p.trim().length >= 8, "La contrase\xF1a no puede contener solo espacios en blanco"),
   name: z2.string().trim().min(2, "El nombre debe tener al menos 2 caracteres").max(80, "El nombre no puede exceder 80 caracteres")
 });
 var LoginUserSchema = z2.object({
-  email: z2.string().trim().toLowerCase().email("El correo electr\xF3nico no es v\xE1lido"),
-  password: z2.string().min(1, "La contrase\xF1a es requerida")
+  email: z2.string().trim().toLowerCase().max(255, "El correo electr\xF3nico no puede exceder 255 caracteres").email("El correo electr\xF3nico no es v\xE1lido"),
+  password: z2.string().min(1, "La contrase\xF1a es requerida").max(100, "La contrase\xF1a no puede exceder 100 caracteres")
 });
 var CreatorProfileSchema = z2.object({
   handle: z2.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,30}$/, "El handle solo puede contener letras min\xFAsculas, n\xFAmeros y guiones bajos (3-30 caracteres)"),
   displayName: z2.string().trim().min(2, "El nombre visible debe tener al menos 2 caracteres").max(60, "El nombre visible no puede exceder 60 caracteres"),
   bio: z2.string().trim().max(300, "La biograf\xEDa no puede exceder 300 caracteres").optional().nullable(),
-  avatarUrl: z2.string().url("La URL del avatar no es v\xE1lida").optional().nullable(),
+  avatarUrl: optionalUrlOrEmptySchema,
   primaryPlatform: z2.enum(["tiktok", "instagram", "youtube"]),
-  tiktokUrl: z2.string().url().optional().nullable(),
-  instagramUrl: z2.string().url().optional().nullable(),
-  youtubeUrl: z2.string().url().optional().nullable(),
+  tiktokUrl: optionalUrlOrEmptySchema,
+  instagramUrl: optionalUrlOrEmptySchema,
+  youtubeUrl: optionalUrlOrEmptySchema,
+  tiktokFollowers: z2.number().int("Los seguidores de TikTok deben ser un n\xFAmero entero").nonnegative("Los seguidores de TikTok no pueden ser negativos").optional().nullable(),
+  instagramFollowers: z2.number().int("Los seguidores de Instagram deben ser un n\xFAmero entero").nonnegative("Los seguidores de Instagram no pueden ser negativos").optional().nullable(),
+  youtubeSubscribers: z2.number().int("Los suscriptores de YouTube deben ser un n\xFAmero entero").nonnegative("Los suscriptores de YouTube no pueden ser negativos").optional().nullable(),
+  audienceUpdatedAt: z2.string().optional().nullable(),
   isPublic: z2.boolean().default(true)
 });
+var AdminUpdateVideoPlacesSchema = z2.object({
+  placeIds: z2.array(z2.string().trim().max(100)).max(10, "No puedes vincular m\xE1s de 10 lugares por video"),
+  primaryPlaceId: z2.string().trim().max(100).optional().nullable()
+}).refine(
+  (data) => {
+    if (data.primaryPlaceId && data.placeIds && data.placeIds.length > 0) {
+      return data.placeIds.includes(data.primaryPlaceId);
+    }
+    return true;
+  },
+  {
+    message: "El lugar principal debe pertenecer a la lista de lugares asociados",
+    path: ["primaryPlaceId"]
+  }
+);
 var SubmitVideoSchema = z2.object({
   videoUrl: z2.string().trim().url("La URL del video debe ser un enlace v\xE1lido").refine((url) => parseAndValidateVideoUrl(url).isValid, {
     message: "La URL debe corresponder a un video v\xE1lido de TikTok, Instagram o YouTube"
@@ -51655,9 +52254,9 @@ var SubmitVideoSchema = z2.object({
   localityId: z2.string().trim().toLowerCase().optional().nullable().refine((locId) => !locId || validLocalityIds.has(locId), {
     message: "La localidad especificada debe pertenecer a la regi\xF3n La Libertad"
   }),
-  thumbnailUrl: z2.string().trim().url("La URL de la miniatura debe ser v\xE1lida").optional().nullable(),
-  placeIds: z2.array(z2.string().trim()).max(10, "No puedes vincular m\xE1s de 10 lugares por video").default([]),
-  primaryPlaceId: z2.string().trim().optional().nullable()
+  thumbnailUrl: safeUrlSchema.optional().nullable(),
+  placeIds: z2.array(z2.string().trim().max(100)).max(10, "No puedes vincular m\xE1s de 10 lugares por video").default([]),
+  primaryPlaceId: z2.string().trim().max(100).optional().nullable()
 }).refine(
   (data) => {
     if (data.primaryPlaceId && data.placeIds) {
@@ -51674,7 +52273,7 @@ var ModerationActionSchema = z2.object({
   action: z2.enum(["APPROVE", "REJECT", "OBSERVE", "HIDE"]),
   reason: z2.string().trim().max(500, "El motivo no puede exceder 500 caracteres").optional().nullable(),
   internalNotes: z2.string().trim().max(500, "Las notas internas no pueden exceder 500 caracteres").optional().nullable(),
-  verifiedPlaceIds: z2.array(z2.string().trim()).optional()
+  verifiedPlaceIds: z2.array(z2.string().trim().max(100)).max(10, "No puedes vincular m\xE1s de 10 lugares verificados").optional()
 });
 var AdminCreateVideoSchema = z2.object({
   videoUrl: z2.string().trim().url("La URL del video debe ser un enlace v\xE1lido").refine((url) => parseAndValidateVideoUrl(url).isValid, {
@@ -51683,18 +52282,18 @@ var AdminCreateVideoSchema = z2.object({
   title: z2.string().trim().min(5, "El t\xEDtulo debe tener al menos 5 caracteres").max(140, "El t\xEDtulo no puede exceder 140 caracteres"),
   description: z2.string().trim().max(1e3, "La descripci\xF3n no puede exceder 1000 caracteres").optional().nullable(),
   contentType: z2.enum(["PLACE", "ROUTE", "GENERAL"]).default("PLACE"),
-  category: z2.string().trim().min(2, "La categor\xEDa es requerida"),
+  category: z2.string().trim().min(2, "La categor\xEDa es requerida").max(50, "La categor\xEDa no puede exceder 50 caracteres"),
   localityId: z2.string().trim().toLowerCase().optional().nullable().refine((locId) => !locId || validLocalityIds.has(locId), {
     message: "La localidad especificada debe pertenecer a la regi\xF3n La Libertad"
   }),
-  thumbnailUrl: z2.string().trim().url("La URL de la miniatura debe ser v\xE1lida").optional().nullable(),
+  thumbnailUrl: safeUrlSchema.optional().nullable(),
   creatorProfileId: z2.string().trim().optional().nullable(),
-  placeIds: z2.array(z2.string().trim()).max(10, "No puedes vincular m\xE1s de 10 lugares por video").default([]),
-  primaryPlaceId: z2.string().trim().optional().nullable(),
+  placeIds: z2.array(z2.string().trim().max(100)).max(10, "No puedes vincular m\xE1s de 10 lugares por video").default([]),
+  primaryPlaceId: z2.string().trim().max(100).optional().nullable(),
   status: z2.enum(["PENDING", "APPROVED"]).default("APPROVED"),
   externalCreatorHandle: z2.string().trim().max(100, "El handle no puede exceder 100 caracteres").optional().nullable(),
   externalCreatorDisplayName: z2.string().trim().max(150, "El nombre no puede exceder 150 caracteres").optional().nullable(),
-  externalCreatorAvatarUrl: z2.string().trim().url("La URL del avatar no es v\xE1lida").optional().nullable()
+  externalCreatorAvatarUrl: safeUrlSchema.optional().nullable()
 }).refine(
   (data) => {
     if (data.primaryPlaceId && data.placeIds) {
@@ -51711,18 +52310,18 @@ var AdminUpdateVideoSchema = z2.object({
   title: z2.string().trim().min(5, "El t\xEDtulo debe tener al menos 5 caracteres").max(140, "El t\xEDtulo no puede exceder 140 caracteres").optional(),
   description: z2.string().trim().max(1e3, "La descripci\xF3n no puede exceder 1000 caracteres").optional().nullable(),
   contentType: z2.enum(["PLACE", "ROUTE", "GENERAL"]).optional(),
-  category: z2.string().trim().min(2, "La categor\xEDa es requerida").optional(),
+  category: z2.string().trim().min(2, "La categor\xEDa es requerida").max(50, "La categor\xEDa no puede exceder 50 caracteres").optional(),
   localityId: z2.string().trim().toLowerCase().optional().nullable().refine((locId) => !locId || validLocalityIds.has(locId), {
     message: "La localidad especificada debe pertenecer a la regi\xF3n La Libertad"
   }),
-  thumbnailUrl: z2.string().trim().url("La URL de la miniatura debe ser v\xE1lida").optional().nullable(),
+  thumbnailUrl: safeUrlSchema.optional().nullable(),
   creatorProfileId: z2.string().trim().optional().nullable(),
-  placeIds: z2.array(z2.string().trim()).max(10, "No puedes vincular m\xE1s de 10 lugares por video").optional(),
-  primaryPlaceId: z2.string().trim().optional().nullable(),
+  placeIds: z2.array(z2.string().trim().max(100)).max(10, "No puedes vincular m\xE1s de 10 lugares por video").optional(),
+  primaryPlaceId: z2.string().trim().max(100).optional().nullable(),
   status: z2.enum(["PENDING", "APPROVED", "OBSERVED", "REJECTED", "HIDDEN"]).optional(),
   externalCreatorHandle: z2.string().trim().max(100, "El handle no puede exceder 100 caracteres").optional().nullable(),
   externalCreatorDisplayName: z2.string().trim().max(150, "El nombre no puede exceder 150 caracteres").optional().nullable(),
-  externalCreatorAvatarUrl: z2.string().trim().url("La URL del avatar no es v\xE1lida").optional().nullable()
+  externalCreatorAvatarUrl: safeUrlSchema.optional().nullable()
 }).refine(
   (data) => {
     if (data.primaryPlaceId && data.placeIds) {
@@ -51740,14 +52339,19 @@ var AdminCreateCreatorSchema = z2.object({
   handle: z2.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,30}$/, "El handle solo puede contener min\xFAsculas, n\xFAmeros y guiones bajos (3-30 caracteres)"),
   displayName: z2.string().trim().min(2, "El nombre debe tener al menos 2 caracteres").max(60, "El nombre no puede exceder 60 caracteres"),
   bio: z2.string().trim().max(300).optional().nullable(),
-  avatarUrl: z2.string().url().optional().nullable(),
+  avatarUrl: optionalUrlOrEmptySchema,
   primaryPlatform: z2.enum(["tiktok", "instagram", "youtube"]),
-  tiktokUrl: z2.string().url().optional().nullable(),
-  instagramUrl: z2.string().url().optional().nullable(),
-  youtubeUrl: z2.string().url().optional().nullable(),
+  tiktokUrl: optionalUrlOrEmptySchema,
+  instagramUrl: optionalUrlOrEmptySchema,
+  youtubeUrl: optionalUrlOrEmptySchema,
+  tiktokFollowers: z2.number().int("Los seguidores de TikTok deben ser un n\xFAmero entero").nonnegative("Los seguidores de TikTok no pueden ser negativos").optional().nullable(),
+  instagramFollowers: z2.number().int("Los seguidores de Instagram deben ser un n\xFAmero entero").nonnegative("Los seguidores de Instagram no pueden ser negativos").optional().nullable(),
+  youtubeSubscribers: z2.number().int("Los suscriptores de YouTube deben ser un n\xFAmero entero").nonnegative("Los suscriptores de YouTube no pueden ser negativos").optional().nullable(),
+  audienceUpdatedAt: z2.string().optional().nullable(),
   isPublic: z2.boolean().default(true),
   isVerified: z2.boolean().default(false)
 });
+var AdminUpdateCreatorSchema = AdminCreateCreatorSchema.partial();
 
 // src/server/authRoutes.ts
 init_repositories();
@@ -51889,17 +52493,24 @@ async function isTokenRevoked(token) {
 async function authMiddleware(req, _res, next) {
   const authHeader = req.headers.authorization;
   let token = null;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    token = authHeader.substring(7).trim();
-  } else if (req.headers.cookie) {
-    const match = req.headers.cookie.match(/libertadgo_token=([^;]+)/);
-    if (match) token = match[1];
+  if (authHeader?.startsWith("Bearer ")) {
+    const bearerToken = authHeader.substring(7).trim();
+    if (bearerToken && bearerToken !== "null" && bearerToken !== "undefined") {
+      const payload = verifyToken(bearerToken);
+      if (payload && !await isTokenRevoked(bearerToken)) {
+        req.user = payload;
+        next();
+        return;
+      }
+    }
   }
-  if (token) {
-    const payload = verifyToken(token);
-    if (payload) {
-      const revoked = await isTokenRevoked(token);
-      if (!revoked) {
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    const match = cookieHeader.match(/(?:^|;\s*)libertadgo_token=([^;]+)/);
+    if (match) {
+      const cookieToken = decodeURIComponent(match[1]);
+      const payload = verifyToken(cookieToken);
+      if (payload && !await isTokenRevoked(cookieToken)) {
         req.user = payload;
       }
     }
@@ -52014,6 +52625,101 @@ function csrfProtectionMiddleware(req, res, next) {
   next();
 }
 
+// src/server/rateLimiter.ts
+function createRateLimiter(options) {
+  const store = /* @__PURE__ */ new Map();
+  const { windowMs, maxRequests, message = "Demasiadas solicitudes. Por favor intenta m\xE1s tarde." } = options;
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of store.entries()) {
+      if (now > record.resetAt) {
+        store.delete(key);
+      }
+    }
+  }, 5 * 60 * 1e3);
+  cleanupInterval.unref();
+  const handler = (req, res, next) => {
+    const now = Date.now();
+    const key = options.keyGenerator ? options.keyGenerator(req) : req.ip || req.socket.remoteAddress || "unknown_client";
+    const record = store.get(key);
+    if (!record || now > record.resetAt) {
+      store.set(key, {
+        count: 1,
+        resetAt: now + windowMs
+      });
+      res.setHeader("X-RateLimit-Limit", maxRequests);
+      res.setHeader("X-RateLimit-Remaining", maxRequests - 1);
+      return next();
+    }
+    if (record.count >= maxRequests) {
+      const retryAfterSeconds = Math.ceil((record.resetAt - now) / 1e3);
+      res.setHeader("Retry-After", retryAfterSeconds);
+      res.setHeader("X-RateLimit-Limit", maxRequests);
+      res.setHeader("X-RateLimit-Remaining", 0);
+      res.status(429).json({
+        success: false,
+        error: message,
+        retryAfterSeconds
+      });
+      return;
+    }
+    record.count += 1;
+    res.setHeader("X-RateLimit-Limit", maxRequests);
+    res.setHeader("X-RateLimit-Remaining", maxRequests - record.count);
+    next();
+  };
+  handler.clearForTesting = () => {
+    store.clear();
+  };
+  return handler;
+}
+var authRateLimiter = createRateLimiter({
+  windowMs: 60 * 1e3,
+  maxRequests: 10,
+  message: "Demasiados intentos de autenticaci\xF3n. Por favor espera 1 minuto."
+});
+var submissionRateLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1e3,
+  maxRequests: 10,
+  message: "L\xEDmite de env\xEDos alcanzado. Puedes registrar hasta 10 videos cada 5 minutos.",
+  keyGenerator: (req) => req.user?.userId || req.ip || "anon_submitter"
+});
+var saveVideoRateLimiter = createRateLimiter({
+  windowMs: 60 * 1e3,
+  maxRequests: 30,
+  message: "L\xEDmite de guardado en favoritos alcanzado. Espera un momento.",
+  keyGenerator: (req) => req.user?.userId || req.ip || "anon_saver"
+});
+var VideoViewDeduplicator = class {
+  constructor() {
+    this.recentViews = /* @__PURE__ */ new Map();
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [key, timestamp] of this.recentViews.entries()) {
+        if (now - timestamp > 60 * 1e3) {
+          this.recentViews.delete(key);
+        }
+      }
+    }, 60 * 1e3);
+    cleanupInterval.unref();
+  }
+  shouldIncrement(videoId, req) {
+    const clientId = req.user?.userId || req.ip || req.socket.remoteAddress || "unknown";
+    const key = `${videoId}___${clientId}`;
+    const now = Date.now();
+    const lastView = this.recentViews.get(key);
+    if (lastView && now - lastView < 60 * 1e3) {
+      return false;
+    }
+    this.recentViews.set(key, now);
+    return true;
+  }
+  clearForTesting() {
+    this.recentViews.clear();
+  }
+};
+var videoViewDeduplicator = new VideoViewDeduplicator();
+
 // src/server/authRoutes.ts
 var authRouter = Router();
 var isProduction = process.env.NODE_ENV === "production";
@@ -52026,7 +52732,7 @@ var COOKIE_OPTIONS = {
   // 7 days
   path: "/"
 };
-authRouter.post("/register", async (req, res) => {
+authRouter.post("/register", authRateLimiter, async (req, res) => {
   const parseResult = RegisterUserSchema.safeParse(req.body);
   if (!parseResult.success) {
     const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
@@ -52077,7 +52783,7 @@ authRouter.post("/register", async (req, res) => {
     res.status(500).json({ success: false, error: "Error interno al registrar usuario" });
   }
 });
-authRouter.post("/login", async (req, res) => {
+authRouter.post("/login", authRateLimiter, async (req, res) => {
   const parseResult = LoginUserSchema.safeParse(req.body);
   if (!parseResult.success) {
     const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
@@ -52192,10 +52898,336 @@ authRouter.get("/me", requireAuth, async (req, res) => {
 import { Router as Router2 } from "express";
 init_repositories();
 init_initialPlaces();
+
+// src/server/oembedService.ts
+var previewCache = /* @__PURE__ */ new Map();
+var CACHE_TTL_MS = 15 * 60 * 1e3;
+var MAX_CACHE_SIZE = 300;
+function getCached(key) {
+  const entry = previewCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    previewCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+function setCache(key, result) {
+  if (previewCache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = previewCache.keys().next().value;
+    if (oldestKey) previewCache.delete(oldestKey);
+  }
+  previewCache.set(key, {
+    result,
+    expiresAt: Date.now() + CACHE_TTL_MS
+  });
+}
+function isAllowedDomain(hostname) {
+  const normalized = hostname.toLowerCase().replace(/^www\./, "");
+  const allowed = [
+    "youtube.com",
+    "m.youtube.com",
+    "youtu.be",
+    "tiktok.com",
+    "m.tiktok.com",
+    "vt.tiktok.com",
+    "vm.tiktok.com",
+    "instagram.com"
+  ];
+  return allowed.includes(normalized);
+}
+function isPrivateOrIpHost(hostname) {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1" || lower === "0.0.0.0") {
+    return true;
+  }
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(lower)) {
+    return true;
+  }
+  if (lower.includes(":")) {
+    return true;
+  }
+  if (lower.endsWith(".local") || lower.endsWith(".internal") || lower.endsWith(".corp")) {
+    return true;
+  }
+  return false;
+}
+async function fetchSafeJson(url, timeoutMs = 5e3, maxBytes = 5e4) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Wayra-TouristPlanner/1.0 (+https://wayra.pe)",
+        Accept: "application/json"
+      }
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    const text = await res.text();
+    if (text.length > maxBytes) {
+      throw new Error("Payload size exceeded limit");
+    }
+    return JSON.parse(text);
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+async function getVideoPreview(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return {
+      success: false,
+      state: "invalid_format",
+      error: "La URL del video es requerida",
+      message: "Ingresa un enlace de video v\xE1lido para visualizar la vista previa"
+    };
+  }
+  const trimmed = rawUrl.trim();
+  const parsed = parseAndValidateVideoUrl(trimmed);
+  if (!parsed.isValid || !parsed.data) {
+    return {
+      success: false,
+      state: "invalid_format",
+      error: parsed.error || "Formato de enlace de video no v\xE1lido",
+      message: parsed.error || "El enlace proporcionado no coincide con los formatos admitidos de TikTok, YouTube o Instagram."
+    };
+  }
+  const { platform, externalVideoId, canonicalUrl, authorHandle } = parsed.data;
+  let parsedUrlObj;
+  try {
+    parsedUrlObj = new URL(canonicalUrl);
+  } catch {
+    return {
+      success: false,
+      state: "invalid_format",
+      error: "URL no v\xE1lida"
+    };
+  }
+  if (parsedUrlObj.protocol !== "https:") {
+    return {
+      success: false,
+      state: "invalid_format",
+      error: "Solo se permiten URLs seguras con HTTPS"
+    };
+  }
+  if (isPrivateOrIpHost(parsedUrlObj.hostname) || !isAllowedDomain(parsedUrlObj.hostname)) {
+    return {
+      success: false,
+      state: "invalid_format",
+      error: "Dominio no permitido por razones de seguridad"
+    };
+  }
+  const cacheKey = canonicalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) {
+    return cached;
+  }
+  let result;
+  try {
+    if (platform === "youtube") {
+      result = await resolveYouTubePreview(externalVideoId, canonicalUrl, authorHandle);
+    } else if (platform === "tiktok") {
+      result = await resolveTikTokPreview(externalVideoId, canonicalUrl, authorHandle);
+    } else if (platform === "instagram") {
+      result = resolveInstagramPreview(externalVideoId, canonicalUrl);
+    } else {
+      result = {
+        success: false,
+        state: "invalid_format",
+        error: "Plataforma no soportada"
+      };
+    }
+  } catch (err) {
+    console.error(`[oEmbed Error] Error processing preview for ${canonicalUrl}:`, err?.message || err);
+    if (err?.status === 404 || err?.status === 401 || err?.status === 403) {
+      result = {
+        success: false,
+        state: "unavailable",
+        message: "No se pudo generar la vista previa. El enlace original puede registrarse igualmente."
+      };
+    } else {
+      result = {
+        success: false,
+        state: "provider_error",
+        message: "Error temporal del proveedor. Puedes registrar el video con su enlace original."
+      };
+    }
+  }
+  if (result.state !== "provider_error") {
+    setCache(cacheKey, result);
+  }
+  return result;
+}
+async function resolveYouTubePreview(videoId, canonicalUrl, authorHandle) {
+  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=0&rel=0&modestbranding=1`;
+  const defaultThumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    const data = await fetchSafeJson(oembedUrl, 4e3);
+    return {
+      success: true,
+      state: "ready",
+      data: {
+        platform: "youtube",
+        videoId,
+        canonicalUrl,
+        embedUrl,
+        title: data?.title || "Video de YouTube",
+        authorName: data?.author_name || authorHandle || "Canal de YouTube",
+        authorUrl: data?.author_url || (authorHandle ? `https://www.youtube.com/@${authorHandle}` : void 0),
+        thumbnailUrl: data?.thumbnail_url || defaultThumbnail,
+        providerName: "YouTube",
+        width: typeof data?.width === "number" ? data.width : 480,
+        height: typeof data?.height === "number" ? data.height : 270
+      }
+    };
+  } catch (err) {
+    if (err?.status === 404) {
+      return {
+        success: false,
+        state: "unavailable",
+        message: "No se pudo generar la vista previa. El enlace original puede registrarse igualmente."
+      };
+    }
+    return {
+      success: true,
+      state: "ready",
+      data: {
+        platform: "youtube",
+        videoId,
+        canonicalUrl,
+        embedUrl,
+        title: "Video de YouTube",
+        authorName: authorHandle ? `@${authorHandle}` : "YouTube",
+        thumbnailUrl: defaultThumbnail,
+        providerName: "YouTube",
+        width: 480,
+        height: 270
+      }
+    };
+  }
+}
+async function resolveTikTokPreview(videoId, canonicalUrl, authorHandle) {
+  const embedUrl = `https://www.tiktok.com/player/v1/${videoId}?music_info=1&description=1&autoplay=0`;
+  try {
+    const oembedEndpoint = `https://www.tiktok.com/oembed?url=${encodeURIComponent(canonicalUrl)}`;
+    const data = await fetchSafeJson(oembedEndpoint, 4500);
+    const safeTitle = data?.title || "Video tur\xEDstico en TikTok";
+    const safeAuthor = data?.author_name || (authorHandle ? `@${authorHandle}` : "Creador de TikTok");
+    const safeThumbnail = data?.thumbnail_url || void 0;
+    return {
+      success: true,
+      state: "ready",
+      data: {
+        platform: "tiktok",
+        videoId: data?.embed_product_id || videoId,
+        canonicalUrl,
+        embedUrl,
+        title: safeTitle,
+        authorName: safeAuthor,
+        authorUrl: data?.author_url || (authorHandle ? `https://www.tiktok.com/@${authorHandle}` : void 0),
+        thumbnailUrl: safeThumbnail,
+        providerName: "TikTok",
+        width: 325,
+        height: 578
+      }
+    };
+  } catch (err) {
+    if (err?.status === 404) {
+      return {
+        success: false,
+        state: "unavailable",
+        message: "No se pudo generar la vista previa. El enlace original puede registrarse igualmente."
+      };
+    }
+    if (/^\d{15,25}$/.test(videoId)) {
+      return {
+        success: true,
+        state: "ready",
+        data: {
+          platform: "tiktok",
+          videoId,
+          canonicalUrl,
+          embedUrl,
+          title: "Video de TikTok",
+          authorName: authorHandle ? `@${authorHandle}` : "TikTok",
+          providerName: "TikTok",
+          width: 325,
+          height: 578
+        }
+      };
+    }
+    return {
+      success: false,
+      state: "provider_error",
+      message: "Error temporal del proveedor. Puedes registrar el video con su enlace original."
+    };
+  }
+}
+function resolveInstagramPreview(shortcode, canonicalUrl) {
+  const embedUrl = `https://www.instagram.com/p/${shortcode}/embed/captioned/`;
+  return {
+    success: true,
+    state: "ready",
+    data: {
+      platform: "instagram",
+      videoId: shortcode,
+      canonicalUrl,
+      embedUrl,
+      title: `Publicaci\xF3n / Reel de Instagram (${shortcode})`,
+      authorName: "Instagram",
+      providerName: "Instagram",
+      width: 400,
+      height: 480
+    }
+  };
+}
+
+// src/server/creatorsRoutes.ts
 var creatorsRouter = Router2();
+creatorsRouter.get("/oembed", async (req, res) => {
+  const rawUrl = req.query.url;
+  if (!rawUrl || typeof rawUrl !== "string") {
+    res.status(400).json({
+      success: false,
+      state: "invalid_format",
+      error: 'Par\xE1metro "url" requerido'
+    });
+    return;
+  }
+  try {
+    const result = await getVideoPreview(rawUrl);
+    res.json(result);
+  } catch (err) {
+    console.error("[oEmbed Router Error]:", err);
+    res.status(500).json({
+      success: false,
+      state: "provider_error",
+      message: "Error al procesar la previsualizaci\xF3n del video"
+    });
+  }
+});
+function sanitizePublicVideo(video, req) {
+  if (!video) return video;
+  const isAdmin = req.user?.role === "ADMIN";
+  const isAuthor = req.user?.userId === video.userId;
+  if (isAdmin || isAuthor) {
+    return video;
+  }
+  const { moderationNotes, moderatedBy, moderatedAt, ...safe } = video;
+  return safe;
+}
 creatorsRouter.get("/videos", async (req, res) => {
   const { localityId, category, contentType, platform, q, placeId, page, limit } = req.query;
   const repo = getCreatorsRepository();
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
   try {
     const result = await repo.listApprovedVideos({
       localityId: typeof localityId === "string" ? localityId : void 0,
@@ -52204,21 +53236,44 @@ creatorsRouter.get("/videos", async (req, res) => {
       platform: typeof platform === "string" ? platform : void 0,
       q: typeof q === "string" ? q : void 0,
       placeId: typeof placeId === "string" ? placeId : void 0,
-      page: page ? Number(page) : 1,
-      limit: limit ? Number(limit) : 20
+      page: safePage,
+      limit: safeLimit
     });
+    const sanitizedVideos = result.videos.map((v) => sanitizePublicVideo(v, req));
     res.json({
       success: true,
-      data: result.videos,
+      data: sanitizedVideos,
       total: result.total,
-      page: Number(page) || 1,
-      limit: Number(limit) || 20
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(result.total / safeLimit) || 1
     });
   } catch (err) {
     console.error("[Creators Error] Error listing approved videos:", err);
     res.status(500).json({ success: false, error: "Error al consultar videos aprobados" });
   }
 });
+var handleGetSavedVideos = async (req, res) => {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: "No autorizado" });
+    return;
+  }
+  const repo = getCreatorsRepository();
+  try {
+    const videos = await repo.listSavedVideosByUser(req.user.userId);
+    const sanitized = videos.map((v) => sanitizePublicVideo(v, req));
+    res.json({
+      success: true,
+      data: sanitized,
+      total: sanitized.length
+    });
+  } catch (err) {
+    console.error("[Creators Error] Error listing saved videos:", err);
+    res.status(500).json({ success: false, error: "Error al consultar videos guardados" });
+  }
+};
+creatorsRouter.get("/saved-videos", requireAuth, handleGetSavedVideos);
+creatorsRouter.get("/videos/saved", requireAuth, handleGetSavedVideos);
 creatorsRouter.get("/videos/:id", async (req, res) => {
   const repo = getCreatorsRepository();
   try {
@@ -52227,16 +53282,22 @@ creatorsRouter.get("/videos/:id", async (req, res) => {
       res.status(404).json({ success: false, error: "Video no encontrado o pendiente de aprobaci\xF3n" });
       return;
     }
-    await repo.incrementInternalViews(video.id);
+    if (video.status === "APPROVED" && (!req.user || req.user.role !== "ADMIN")) {
+      if (videoViewDeduplicator.shouldIncrement(video.id, req)) {
+        await repo.incrementInternalViews(video.id);
+        video.internalViewsCount = (video.internalViewsCount || 0) + 1;
+      }
+    }
     const places = await repo.getPlacesForVideo(video.id);
     let isSaved = false;
     if (req.user) {
       isSaved = await repo.isSavedByUser(req.user.userId, video.id);
     }
+    const sanitizedVideo = sanitizePublicVideo(video, req);
     res.json({
       success: true,
       data: {
-        ...video,
+        ...sanitizedVideo,
         places,
         isSaved
       }
@@ -52246,7 +53307,7 @@ creatorsRouter.get("/videos/:id", async (req, res) => {
     res.status(500).json({ success: false, error: "Error al obtener detalle del video" });
   }
 });
-creatorsRouter.post("/submissions", requireAuth, async (req, res) => {
+creatorsRouter.post("/submissions", requireAuth, submissionRateLimiter, async (req, res) => {
   if (!req.user) {
     res.status(401).json({ success: false, error: "Autenticaci\xF3n requerida" });
     return;
@@ -52365,7 +53426,7 @@ creatorsRouter.get("/profiles/:handle", async (req, res) => {
       res.status(404).json({ success: false, error: "Perfil de creador no encontrado o privado" });
       return;
     }
-    const videos = await repo.listSubmissionsByUser(profile.userId);
+    const videos = await repo.listSubmissionsByCreatorProfileId(profile.id);
     const approvedVideos = videos.filter((v) => v.status === "APPROVED");
     res.json({
       success: true,
@@ -52414,16 +53475,25 @@ creatorsRouter.put("/profile/me", requireAuth, async (req, res) => {
     res.status(500).json({ success: false, error: "Error al actualizar perfil de creador" });
   }
 });
-creatorsRouter.post("/videos/:id/save", requireAuth, async (req, res) => {
+creatorsRouter.post("/videos/:id/save", requireAuth, saveVideoRateLimiter, async (req, res) => {
   if (!req.user) {
     res.status(401).json({ success: false, error: "No autorizado" });
     return;
   }
   const repo = getCreatorsRepository();
   try {
+    const video = await repo.findSubmissionById(req.params.id);
+    if (!video || video.status !== "APPROVED" && (!req.user || req.user.role !== "ADMIN" && req.user.userId !== video.userId)) {
+      res.status(404).json({ success: false, error: "Video no encontrado o no disponible para guardar" });
+      return;
+    }
     const result = await repo.toggleSaveVideo(req.user.userId, req.params.id);
     res.json({ success: true, saved: result.saved });
   } catch (err) {
+    if (err?.message?.includes("no encontrado") || err?.message?.includes("no disponible")) {
+      res.status(404).json({ success: false, error: err.message });
+      return;
+    }
     console.error("[Creators Error] Error saving video:", err);
     res.status(500).json({ success: false, error: "Error al guardar video en favoritos" });
   }
@@ -52432,10 +53502,11 @@ creatorsRouter.get("/places/:placeId/videos", async (req, res) => {
   const repo = getCreatorsRepository();
   try {
     const videos = await repo.getVideosForPlace(req.params.placeId);
+    const sanitizedVideos = videos.map((v) => sanitizePublicVideo(v, req));
     res.json({
       success: true,
-      data: videos,
-      total: videos.length,
+      data: sanitizedVideos,
+      total: sanitizedVideos.length,
       placeId: req.params.placeId
     });
   } catch (err) {
@@ -52445,98 +53516,241 @@ creatorsRouter.get("/places/:placeId/videos", async (req, res) => {
 });
 
 // src/server/adminRoutes.ts
-import { Router as Router3 } from "express";
+import express, { Router as Router3 } from "express";
 init_repositories();
 init_initialPlaces();
-init_placeRepository();
 
-// src/server/placesSchemas.ts
-import { z as z3 } from "zod";
-var PlaceCoordinatesSchema = z3.object({
-  lat: z3.number().min(-90).max(90),
-  lng: z3.number().min(-180).max(180)
-});
-var PlaceImageSchema = z3.object({
-  id: z3.string().default(() => `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`),
-  url: z3.string().url(),
-  caption: z3.string().optional(),
-  author: z3.string().optional(),
-  license: z3.string().optional(),
-  isCover: z3.boolean().default(false)
-});
-var PlaceOpeningHourSchema = z3.object({
-  dayOfWeek: z3.number().min(0).max(6),
-  openTime: z3.string(),
-  closeTime: z3.string(),
-  isClosed: z3.boolean().default(false)
-});
-var PlaceSourceSchema = z3.object({
-  placeId: z3.string().optional(),
-  sourceId: z3.string(),
-  externalId: z3.string(),
-  rawDataRef: z3.string().optional(),
-  lastSyncedAt: z3.string().optional()
-});
-var PlaceVerificationSchema = z3.object({
-  isVerified: z3.boolean(),
-  verificationLevel: z3.enum(["unverified", "community", "official_mincetur", "partner_verified"]),
-  verifiedBy: z3.string().optional(),
-  verifiedAt: z3.string().optional(),
-  notes: z3.string().optional()
-});
-var CreatePlaceSchema = z3.object({
-  name: z3.string().min(2, "El nombre debe tener al menos 2 caracteres"),
-  category: z3.enum([
-    "restaurantes",
-    "gastronomia",
-    "atractivos",
-    "arqueologia",
-    "playas",
-    "museos",
-    "cultura",
-    "naturaleza",
-    "hoteles",
-    "actividades"
-  ]),
-  subcategory: z3.string().optional(),
-  localityId: z3.string().min(1, "La localidad es obligatoria"),
-  localityName: z3.string().min(1, "El nombre de localidad es obligatorio"),
-  address: z3.string().min(3, "La direcci\xF3n es obligatoria"),
-  coordinates: PlaceCoordinatesSchema,
-  geohash: z3.string().optional(),
-  shortDescription: z3.string().min(5, "La descripci\xF3n corta es requerida"),
-  fullDescription: z3.string().optional(),
-  phone: z3.string().optional(),
-  email: z3.string().email().optional().or(z3.literal("")),
-  website: z3.string().url().optional().or(z3.literal("")),
-  mapsUrl: z3.string().optional(),
-  googlePlaceId: z3.string().optional(),
-  priceLevel: z3.union([z3.literal(1), z3.literal(2), z3.literal(3), z3.literal(4)]).optional(),
-  rating: z3.number().min(0).max(5).optional(),
-  reviewsCount: z3.number().min(0).optional(),
-  images: z3.array(PlaceImageSchema).optional(),
-  openingHours: z3.array(PlaceOpeningHourSchema).optional(),
-  verification: PlaceVerificationSchema.optional(),
-  sources: z3.array(PlaceSourceSchema).optional(),
-  tags: z3.array(z3.string()).optional(),
-  recommendedDurationMinutes: z3.number().min(5).optional(),
-  safetyScore: z3.number().min(0).max(100).optional(),
-  status: z3.enum(["DRAFT", "FLAGGED", "PUBLISHED", "ARCHIVED"]).default("PUBLISHED")
-});
-var UpdatePlaceSchema = CreatePlaceSchema.partial();
-var UpdatePlaceStatusSchema = z3.object({
-  status: z3.enum(["DRAFT", "FLAGGED", "PUBLISHED", "ARCHIVED"]),
-  reason: z3.string().optional()
-});
-var VerifyPlaceSchema = z3.object({
-  isVerified: z3.boolean(),
-  verificationLevel: z3.enum(["unverified", "community", "official_mincetur", "partner_verified"]),
-  notes: z3.string().optional()
-});
-var MergeDuplicatesSchema = z3.object({
-  primaryId: z3.string().min(1, "primaryId es obligatorio"),
-  duplicateIds: z3.array(z3.string().min(1)).min(1, "Debe proporcionar al menos un ID duplicado")
-});
+// src/server/services/storageService.ts
+import fs from "fs";
+import path from "path";
+import crypto4 from "crypto";
+import { fileURLToPath } from "url";
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand
+} from "@aws-sdk/client-s3";
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = path.dirname(__filename);
+var MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024;
+var ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp"
+];
+var cachedS3Client = null;
+function getR2ConfigStatus() {
+  const requiredVars = [
+    "R2_ACCOUNT_ID",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET_NAME",
+    "R2_PUBLIC_URL"
+  ];
+  const missing = requiredVars.filter((v) => !process.env[v] || process.env[v].trim() === "");
+  const isConfigured = missing.length === 0;
+  const accountId = process.env.R2_ACCOUNT_ID?.trim();
+  return {
+    isConfigured,
+    missingVariables: missing,
+    bucketName: process.env.R2_BUCKET_NAME?.trim() || void 0,
+    publicUrl: process.env.R2_PUBLIC_URL?.trim() || void 0,
+    endpoint: accountId ? `https://${accountId}.r2.cloudflarestorage.com` : void 0,
+    mode: isConfigured ? "r2" : "local"
+  };
+}
+function getR2Client() {
+  if (cachedS3Client) {
+    return cachedS3Client;
+  }
+  const accountId = process.env.R2_ACCOUNT_ID?.trim();
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
+  if (!accountId || !accessKeyId || !secretAccessKey) {
+    throw new Error("Configuraci\xF3n incompleta de Cloudflare R2: faltan credenciales o Account ID.");
+  }
+  cachedS3Client = new S3Client({
+    region: "auto",
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId,
+      secretAccessKey
+    }
+  });
+  return cachedS3Client;
+}
+function validateImageSignature(buffer) {
+  if (buffer.length < 12) {
+    return { isValid: false, error: "El archivo es demasiado peque\xF1o o est\xE1 da\xF1ado" };
+  }
+  if (buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255) {
+    return { isValid: true, detectedMime: "image/jpeg" };
+  }
+  if (buffer[0] === 137 && buffer[1] === 80 && buffer[2] === 78 && buffer[3] === 71 && buffer[4] === 13 && buffer[5] === 10 && buffer[6] === 26 && buffer[7] === 10) {
+    return { isValid: true, detectedMime: "image/png" };
+  }
+  const header = buffer.toString("ascii", 0, 4);
+  const format = buffer.toString("ascii", 8, 12);
+  if (header === "RIFF" && format === "WEBP") {
+    return { isValid: true, detectedMime: "image/webp" };
+  }
+  return {
+    isValid: false,
+    error: "Formato no soportado. Solo se permiten im\xE1genes en formato JPG, JPEG, PNG o WebP."
+  };
+}
+async function uploadCreatorAvatar(fileBuffer, originalFilename, providedMime) {
+  if (fileBuffer.length > MAX_AVATAR_SIZE_BYTES) {
+    throw new Error(
+      `El tama\xF1o del archivo (${(fileBuffer.length / (1024 * 1024)).toFixed(2)} MB) excede el l\xEDmite m\xE1ximo permitido de 5 MB`
+    );
+  }
+  if (fileBuffer.length === 0) {
+    throw new Error("El archivo de imagen est\xE1 vac\xEDo");
+  }
+  const sigCheck = validateImageSignature(fileBuffer);
+  if (!sigCheck.isValid || !sigCheck.detectedMime) {
+    throw new Error(sigCheck.error || "Formato de imagen inv\xE1lido. Solo se admiten JPG, PNG y WebP.");
+  }
+  const mimeType = sigCheck.detectedMime;
+  const extMap = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp"
+  };
+  const extension = extMap[mimeType] || ".jpg";
+  const randomSuffix = crypto4.randomBytes(6).toString("hex");
+  const safeFilename = `creator_avatar_${Date.now()}_${randomSuffix}${extension}`;
+  const key = `avatars/${safeFilename}`;
+  const r2Status = getR2ConfigStatus();
+  if (r2Status.isConfigured || cachedS3Client) {
+    try {
+      const client = getR2Client();
+      const bucket = (process.env.R2_BUCKET_NAME || "wayra-avatars").trim();
+      console.log(`[Storage] Subiendo avatar a Cloudflare R2 (bucket: "${bucket}", key: "${key}", tama\xF1o: ${(fileBuffer.length / 1024).toFixed(1)} KB)...`);
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: fileBuffer,
+          ContentType: mimeType,
+          CacheControl: "public, max-age=31536000, immutable"
+        })
+      );
+      const publicBaseUrl = (process.env.R2_PUBLIC_URL || "").replace(/\/$/, "");
+      const publicUrl = publicBaseUrl ? `${publicBaseUrl}/${key}` : `https://${bucket}.r2.dev/${key}`;
+      console.log(`[Storage] Avatar persistido exitosamente en Cloudflare R2: ${publicUrl}`);
+      return {
+        url: publicUrl,
+        filename: safeFilename,
+        key,
+        size: fileBuffer.length,
+        mimeType,
+        storage: "r2"
+      };
+    } catch (err) {
+      console.error("[Storage Error] Fall\xF3 la subida a Cloudflare R2:", err);
+      if (process.env.NODE_ENV === "production") {
+        const errorMsg = err instanceof Error ? err.message : "Error al comunicar con Cloudflare R2";
+        throw new Error(`Error de persistencia en Cloudflare R2: ${errorMsg}`);
+      }
+      console.warn("[Storage Warning] En desarrollo, recurriendo a almacenamiento local tras error en R2");
+    }
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "El almacenamiento persistente Cloudflare R2 no est\xE1 configurado en producci\xF3n. En Google Cloud Run el almacenamiento local es ef\xEDmero y se destruye al reiniciar instancias. Configure R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME y R2_PUBLIC_URL en Cloud Run para habilitar la persistencia de fotograf\xEDas de creadores."
+    );
+  }
+  const publicDir = path.resolve(__dirname, "../../../public");
+  const avatarsDir = path.join(publicDir, "uploads", "avatars");
+  if (!fs.existsSync(avatarsDir)) {
+    fs.mkdirSync(avatarsDir, { recursive: true });
+  }
+  const targetPath = path.join(avatarsDir, safeFilename);
+  fs.writeFileSync(targetPath, fileBuffer);
+  const localUrl = `/uploads/avatars/${safeFilename}`;
+  console.log(`[Storage Dev] Avatar guardado en almacenamiento local de desarrollo: ${localUrl} (${(fileBuffer.length / 1024).toFixed(1)} KB)`);
+  return {
+    url: localUrl,
+    filename: safeFilename,
+    key,
+    size: fileBuffer.length,
+    mimeType,
+    storage: "local"
+  };
+}
+async function deleteAvatar(avatarUrl) {
+  if (!avatarUrl || typeof avatarUrl !== "string") return false;
+  if (avatarUrl.startsWith("/uploads/avatars/")) {
+    const filename = path.basename(avatarUrl);
+    if (!/^[a-zA-Z0-9_\-\.]+$/.test(filename)) {
+      return false;
+    }
+    const publicDir = path.resolve(__dirname, "../../../public");
+    const targetPath = path.join(publicDir, "uploads", "avatars", filename);
+    try {
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+        console.log(`[Storage] Archivo de avatar local eliminado: ${targetPath}`);
+        return true;
+      }
+    } catch (err) {
+      console.error(`[Storage Error] Fall\xF3 eliminaci\xF3n de avatar local ${targetPath}:`, err);
+    }
+    return false;
+  }
+  if (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://")) {
+    try {
+      const parsedUrl = new URL(avatarUrl);
+      const publicBaseUrl = (process.env.R2_PUBLIC_URL || "").replace(/\/$/, "");
+      const bucket = (process.env.R2_BUCKET_NAME || "").trim();
+      let isAuthorizedOrigin = false;
+      if (publicBaseUrl) {
+        try {
+          const parsedConfigured = new URL(publicBaseUrl);
+          if (parsedUrl.origin === parsedConfigured.origin) {
+            isAuthorizedOrigin = true;
+          }
+        } catch {
+        }
+      }
+      if (bucket && (parsedUrl.hostname.includes(".r2.dev") || parsedUrl.hostname.includes(".r2.cloudflarestorage.com"))) {
+        isAuthorizedOrigin = true;
+      }
+      if (cachedS3Client && (parsedUrl.hostname === "media.wayra.pe" || parsedUrl.hostname === "r2.test")) {
+        isAuthorizedOrigin = true;
+      }
+      if (!isAuthorizedOrigin) {
+        console.warn(`[Storage Security] Rechazo de eliminaci\xF3n: La URL ${avatarUrl} no pertenece al dominio R2 autorizado`);
+        return false;
+      }
+      if (!parsedUrl.pathname.includes("/avatars/")) {
+        console.warn(`[Storage Security] Rechazo de eliminaci\xF3n: La ruta ${parsedUrl.pathname} no est\xE1 dentro del prefijo /avatars/`);
+        return false;
+      }
+      const filename = path.basename(parsedUrl.pathname);
+      if (!/^[a-zA-Z0-9_\-\.]+$/.test(filename)) {
+        return false;
+      }
+      const key = `avatars/${filename}`;
+      const client = getR2Client();
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: bucket || "wayra-avatars",
+          Key: key
+        })
+      );
+      console.log(`[Storage] Objeto eliminado exitosamente de Cloudflare R2: ${key}`);
+      return true;
+    } catch (err) {
+      console.error(`[Storage Error] Error al eliminar objeto de Cloudflare R2:`, err);
+      return false;
+    }
+  }
+  return false;
+}
 
 // src/server/adminRoutes.ts
 var adminRouter = Router3();
@@ -52545,11 +53759,7 @@ adminRouter.get("/metrics", async (_req, res) => {
   const repo = getCreatorsRepository();
   try {
     const metrics = await repo.getAdminMetrics();
-    res.json({
-      success: true,
-      data: metrics,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    });
+    res.json({ success: true, data: metrics, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
   } catch (err) {
     console.error("[Admin Error] Error fetching admin metrics:", err);
     res.status(500).json({ success: false, error: "Error al consultar m\xE9tricas del sistema" });
@@ -52557,18 +53767,23 @@ adminRouter.get("/metrics", async (_req, res) => {
 });
 adminRouter.get("/moderation/queue", async (req, res) => {
   const repo = getCreatorsRepository();
-  const statusFilter = req.query.status || "PENDING";
+  const rawStatus = typeof req.query.status === "string" ? req.query.status : "ALL";
+  const validStatuses = ["PENDING", "APPROVED", "OBSERVED", "REJECTED", "HIDDEN"];
+  const statusFilter = rawStatus === "ALL" ? "ALL" : validStatuses.includes(rawStatus) ? rawStatus : "ALL";
   try {
-    const queue = await repo.listModerationQueue(statusFilter);
-    const enriched = await Promise.all(
-      queue.map(async (v) => {
-        const places = await repo.getPlacesForVideo(v.id);
-        return {
-          ...v,
-          places
-        };
-      })
-    );
+    let queue;
+    if (statusFilter === "ALL") {
+      const batches = await Promise.all(validStatuses.map((status) => repo.listModerationQueue(status)));
+      queue = batches.flat();
+    } else {
+      queue = await repo.listModerationQueue(statusFilter);
+    }
+    const videoIds = queue.map((v) => v.id);
+    const placesMap = typeof repo.getPlacesForVideos === "function" ? await repo.getPlacesForVideos(videoIds) : null;
+    const enriched = await Promise.all(queue.map(async (v) => ({
+      ...v,
+      places: placesMap ? placesMap[v.id] || [] : await repo.getPlacesForVideo(v.id)
+    })));
     res.json({
       success: true,
       data: enriched,
@@ -52587,8 +53802,7 @@ adminRouter.post("/moderation/:id/action", async (req, res) => {
   }
   const parseResult = ModerationActionSchema.safeParse(req.body);
   if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
+    res.status(400).json({ success: false, error: parseResult.error.issues.map((i) => i.message).join(", ") });
     return;
   }
   const { action, reason, internalNotes, verifiedPlaceIds } = parseResult.data;
@@ -52625,19 +53839,15 @@ adminRouter.post("/moderation/:id/action", async (req, res) => {
       auditPayload,
       validPlaceIds
     );
-    res.json({
-      success: true,
-      data: updated,
-      message: `Publicaci\xF3n moderada con \xE9xito. Estado: ${newStatus}`
-    });
+    res.json({ success: true, data: updated, message: `Publicaci\xF3n moderada con \xE9xito. Estado: ${newStatus}` });
   } catch (err) {
     console.error("[Admin Error] Error performing moderation action:", err);
     res.status(500).json({ success: false, error: "Error interno al procesar acci\xF3n de moderaci\xF3n" });
   }
 });
 adminRouter.get("/moderation/:id/history", async (req, res) => {
-  const repo = getCreatorsRepository();
   try {
+    const repo = getCreatorsRepository();
     const logs = await repo.getModerationLogs(req.params.id);
     res.json({ success: true, data: logs });
   } catch (err) {
@@ -52646,38 +53856,52 @@ adminRouter.get("/moderation/:id/history", async (req, res) => {
   }
 });
 adminRouter.put("/moderation/:id/places", async (req, res) => {
-  const { placeIds, primaryPlaceId } = req.body;
-  if (!Array.isArray(placeIds)) {
-    res.status(400).json({ success: false, error: "placeIds debe ser un array de identificadores" });
+  if (!req.user) {
+    res.status(401).json({ success: false, error: "No autorizado" });
     return;
   }
-  const invalidPlaceIds = placeIds.filter(
-    (pId) => !INITIAL_PLACES.some((p) => p.id === pId)
-  );
+  const parseResult = AdminUpdateVideoPlacesSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    res.status(400).json({ success: false, error: parseResult.error.issues.map((i) => i.message).join(", ") });
+    return;
+  }
+  const { placeIds, primaryPlaceId } = parseResult.data;
+  const invalidPlaceIds = placeIds.filter((pId) => !INITIAL_PLACES.some((p) => p.id === pId));
   if (invalidPlaceIds.length > 0) {
-    res.status(400).json({
-      success: false,
-      error: `Los siguientes lugares no existen en el cat\xE1logo tur\xEDstico: ${invalidPlaceIds.join(", ")}`
-    });
+    res.status(400).json({ success: false, error: `Los siguientes lugares no existen en el cat\xE1logo tur\xEDstico: ${invalidPlaceIds.join(", ")}` });
     return;
   }
   const uniquePlaceIds = Array.from(new Set(placeIds));
   if (primaryPlaceId && uniquePlaceIds.length > 0 && !uniquePlaceIds.includes(primaryPlaceId)) {
-    res.status(400).json({
-      success: false,
-      error: "El lugar principal debe pertenecer a la lista de lugares asociados"
-    });
+    res.status(400).json({ success: false, error: "El lugar principal debe pertenecer a la lista de lugares asociados" });
     return;
   }
   const repo = getCreatorsRepository();
   try {
+    const existing = await repo.findSubmissionById(req.params.id);
+    if (!existing) {
+      res.status(404).json({ success: false, error: "Publicaci\xF3n no encontrada" });
+      return;
+    }
+    const previousPlaces = await repo.getPlacesForVideo(req.params.id);
     await repo.associatePlaces(req.params.id, uniquePlaceIds, primaryPlaceId);
     const updatedPlaces = await repo.getPlacesForVideo(req.params.id);
-    res.json({
-      success: true,
-      data: updatedPlaces,
-      message: "Lugares vinculados actualizados correctamente"
-    });
+    const addedPlaceIds = uniquePlaceIds.filter((id) => !previousPlaces.some((p) => p.id === id));
+    const removedPlaceIds = previousPlaces.map((p) => p.id).filter((id) => !uniquePlaceIds.includes(id));
+    if (addedPlaceIds.length > 0 || removedPlaceIds.length > 0) {
+      await repo.addModerationLog({
+        videoId: req.params.id,
+        adminUserId: req.user.userId,
+        adminName: req.user.name,
+        action: "UPDATE",
+        previousStatus: existing.status,
+        newStatus: existing.status,
+        reason: "Cambio de asociaciones con lugares tur\xEDsticos",
+        internalNotes: `A\xF1adidos: ${addedPlaceIds.join(", ") || "ninguno"}; retirados: ${removedPlaceIds.join(", ") || "ninguno"}`,
+        changedFields: ["placeIds"]
+      });
+    }
+    res.json({ success: true, data: updatedPlaces, message: "Lugares vinculados actualizados correctamente" });
   } catch (err) {
     console.error("[Admin Error] Error updating linked places:", err);
     res.status(500).json({ success: false, error: "Error al actualizar lugares asociados" });
@@ -52690,8 +53914,7 @@ adminRouter.post("/videos", async (req, res) => {
   }
   const parseResult = AdminCreateVideoSchema.safeParse(req.body);
   if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
+    res.status(400).json({ success: false, error: parseResult.error.issues.map((i) => i.message).join(", ") });
     return;
   }
   const {
@@ -52717,43 +53940,29 @@ adminRouter.post("/videos", async (req, res) => {
   }
   const repo = getCreatorsRepository();
   try {
-    const existing = await repo.findSubmissionByPlatformAndExternalId(
-      parsed.data.platform,
-      parsed.data.externalVideoId
-    );
+    const existing = await repo.findSubmissionByPlatformAndExternalId(parsed.data.platform, parsed.data.externalVideoId);
     if (existing) {
-      res.status(409).json({
-        success: false,
-        error: `Este video ya se encuentra registrado con estado: ${existing.status}`
-      });
+      res.status(409).json({ success: false, error: `Este video ya se encuentra registrado con estado: ${existing.status}` });
       return;
     }
-    const invalidPlaceIds = placeIds.filter(
-      (pId) => !INITIAL_PLACES.some((p) => p.id === pId)
-    );
+    const invalidPlaceIds = placeIds.filter((pId) => !INITIAL_PLACES.some((p) => p.id === pId));
     if (invalidPlaceIds.length > 0) {
-      res.status(400).json({
-        success: false,
-        error: `Los siguientes lugares no existen en el cat\xE1logo tur\xEDstico: ${invalidPlaceIds.join(", ")}`
-      });
+      res.status(400).json({ success: false, error: `Los siguientes lugares no existen en el cat\xE1logo tur\xEDstico: ${invalidPlaceIds.join(", ")}` });
       return;
     }
     const uniquePlaceIds = Array.from(new Set(placeIds));
     if (primaryPlaceId && uniquePlaceIds.length > 0 && !uniquePlaceIds.includes(primaryPlaceId)) {
-      res.status(400).json({
-        success: false,
-        error: "El lugar principal debe pertenecer a la lista de lugares asociados"
-      });
+      res.status(400).json({ success: false, error: "El lugar principal debe pertenecer a la lista de lugares asociados" });
       return;
     }
-    const resultingStatus = status || "APPROVED";
+    const resultingStatus = status || "PENDING";
     const auditPayload = {
       adminUserId: req.user.userId,
       adminName: req.user.name,
       action: "CREATE",
       previousStatus: null,
       newStatus: resultingStatus,
-      reason: "Registro y publicaci\xF3n directa desde el panel de administraci\xF3n",
+      reason: "Registro desde el panel de administraci\xF3n",
       internalNotes: `Creado por administrador ${req.user.name}`
     };
     const submission = await repo.createSubmission(
@@ -52779,11 +53988,7 @@ adminRouter.post("/videos", async (req, res) => {
       primaryPlaceId || (uniquePlaceIds[0] || null),
       auditPayload
     );
-    res.status(201).json({
-      success: true,
-      data: submission,
-      message: "Video registrado y catalogado exitosamente"
-    });
+    res.status(201).json({ success: true, data: submission, message: "Video registrado y enviado a revisi\xF3n" });
   } catch (err) {
     console.error("[Admin Error] Error creating video:", err);
     res.status(500).json({ success: false, error: "Error interno al registrar el video" });
@@ -52796,8 +54001,7 @@ adminRouter.put("/videos/:id", async (req, res) => {
   }
   const parseResult = AdminUpdateVideoSchema.safeParse(req.body);
   if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
+    res.status(400).json({ success: false, error: parseResult.error.issues.map((i) => i.message).join(", ") });
     return;
   }
   const repo = getCreatorsRepository();
@@ -52808,49 +54012,32 @@ adminRouter.put("/videos/:id", async (req, res) => {
       return;
     }
     const { placeIds, primaryPlaceId, ...updateFields } = parseResult.data;
+    const previousPlaces = await repo.getPlacesForVideo(req.params.id);
     if (placeIds !== void 0) {
-      const invalidPlaceIds = placeIds.filter(
-        (pId) => !INITIAL_PLACES.some((p) => p.id === pId)
-      );
+      const invalidPlaceIds = placeIds.filter((pId) => !INITIAL_PLACES.some((p) => p.id === pId));
       if (invalidPlaceIds.length > 0) {
-        res.status(400).json({
-          success: false,
-          error: `Los siguientes lugares no existen en el cat\xE1logo tur\xEDstico: ${invalidPlaceIds.join(", ")}`
-        });
+        res.status(400).json({ success: false, error: `Los siguientes lugares no existen en el cat\xE1logo tur\xEDstico: ${invalidPlaceIds.join(", ")}` });
         return;
       }
     }
     const uniquePlaceIds = placeIds !== void 0 ? Array.from(new Set(placeIds)) : void 0;
-    if (uniquePlaceIds !== void 0 && primaryPlaceId) {
-      if (!uniquePlaceIds.includes(primaryPlaceId)) {
-        res.status(400).json({
-          success: false,
-          error: "El lugar principal debe pertenecer a la lista de lugares asociados"
-        });
-        return;
-      }
-    } else if (uniquePlaceIds === void 0 && primaryPlaceId) {
-      const currentPlaces = await repo.getPlacesForVideo(req.params.id);
-      if (!currentPlaces.some((p) => p.id === primaryPlaceId)) {
-        res.status(400).json({
-          success: false,
-          error: "El lugar principal debe pertenecer a los lugares actualmente asociados al video"
-        });
-        return;
-      }
+    if (uniquePlaceIds !== void 0 && primaryPlaceId && !uniquePlaceIds.includes(primaryPlaceId)) {
+      res.status(400).json({ success: false, error: "El lugar principal debe pertenecer a la lista de lugares asociados" });
+      return;
     }
     const changedFields = [];
     for (const [key, val] of Object.entries(updateFields)) {
-      if (val !== void 0 && existing[key] !== val) {
-        changedFields.push(key);
-      }
+      if (val !== void 0 && existing[key] !== val) changedFields.push(key);
     }
+    let placeChangeSummary = "";
     if (uniquePlaceIds !== void 0) {
       changedFields.push("placeIds");
+      const previousIds = previousPlaces.map((p) => p.id);
+      const addedPlaceIds = uniquePlaceIds.filter((id) => !previousIds.includes(id));
+      const removedPlaceIds = previousIds.filter((id) => !uniquePlaceIds.includes(id));
+      placeChangeSummary = ` A\xF1adidos: ${addedPlaceIds.join(", ") || "ninguno"}; retirados: ${removedPlaceIds.join(", ") || "ninguno"}.`;
     }
-    if (primaryPlaceId !== void 0) {
-      changedFields.push("primaryPlaceId");
-    }
+    if (primaryPlaceId !== void 0) changedFields.push("primaryPlaceId");
     const resultingStatus = updateFields.status || existing.status;
     const auditPayload = {
       adminUserId: req.user.userId,
@@ -52859,37 +54046,23 @@ adminRouter.put("/videos/:id", async (req, res) => {
       previousStatus: existing.status,
       newStatus: resultingStatus,
       reason: "Edici\xF3n administrativa de metadatos o lugares asociados",
-      internalNotes: `Modificado por ${req.user.name}`,
+      internalNotes: `Modificado por ${req.user.name}.${placeChangeSummary}`,
       changedFields: changedFields.length > 0 ? changedFields : null
     };
-    const updated = await repo.updateSubmission(
-      req.params.id,
-      updateFields,
-      uniquePlaceIds,
-      primaryPlaceId,
-      auditPayload
-    );
-    res.json({
-      success: true,
-      data: updated,
-      message: "Metadatos de video actualizados exitosamente"
-    });
+    const updated = await repo.updateSubmission(req.params.id, updateFields, uniquePlaceIds, primaryPlaceId, auditPayload);
+    res.json({ success: true, data: updated, message: "Metadatos de video actualizados exitosamente" });
   } catch (err) {
     console.error("[Admin Error] Error updating video:", err);
     res.status(500).json({ success: false, error: "Error interno al actualizar el video" });
   }
 });
 adminRouter.get("/creators", async (_req, res) => {
-  const repo = getCreatorsRepository();
   try {
+    const repo = getCreatorsRepository();
     const creators = await repo.listAllCreators();
-    res.json({
-      success: true,
-      data: creators,
-      total: creators.length
-    });
+    res.json({ success: true, data: creators, total: creators.length });
   } catch (err) {
-    console.error("[Admin Error] Error listing creators for admin:", err);
+    console.error("[Admin Error] Error listing creators:", err);
     res.status(500).json({ success: false, error: "Error al consultar directorio de creadores" });
   }
 });
@@ -52900,23 +54073,19 @@ adminRouter.post("/creators", async (req, res) => {
   }
   const parseResult = AdminCreateCreatorSchema.safeParse(req.body);
   if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
+    res.status(400).json({ success: false, error: parseResult.error.issues.map((i) => i.message).join(", ") });
     return;
   }
   const repo = getCreatorsRepository();
   try {
     const existing = await repo.findCreatorProfileByHandle(parseResult.data.handle);
     if (existing) {
-      res.status(409).json({
-        success: false,
-        error: `El identificador @${parseResult.data.handle} ya est\xE1 registrado`
-      });
+      res.status(409).json({ success: false, error: `El identificador @${parseResult.data.handle} ya est\xE1 registrado` });
       return;
     }
-    const targetUserId = parseResult.data.userId || req.user.userId;
-    const profile = await repo.saveCreatorProfile({
-      userId: targetUserId,
+    const hasAudienceData = parseResult.data.tiktokFollowers !== void 0 || parseResult.data.instagramFollowers !== void 0 || parseResult.data.youtubeSubscribers !== void 0;
+    const profile = await repo.createCreatorProfile({
+      userId: null,
       handle: parseResult.data.handle,
       displayName: parseResult.data.displayName,
       bio: parseResult.data.bio || null,
@@ -52925,337 +54094,162 @@ adminRouter.post("/creators", async (req, res) => {
       tiktokUrl: parseResult.data.tiktokUrl || null,
       instagramUrl: parseResult.data.instagramUrl || null,
       youtubeUrl: parseResult.data.youtubeUrl || null,
+      tiktokFollowers: parseResult.data.tiktokFollowers ?? null,
+      instagramFollowers: parseResult.data.instagramFollowers ?? null,
+      youtubeSubscribers: parseResult.data.youtubeSubscribers ?? null,
+      audienceUpdatedAt: parseResult.data.audienceUpdatedAt || (hasAudienceData ? (/* @__PURE__ */ new Date()).toISOString() : null),
       isPublic: parseResult.data.isPublic ?? true,
       isVerified: parseResult.data.isVerified ?? false
     });
-    res.status(201).json({
-      success: true,
-      data: profile,
-      message: "Perfil de creador registrado exitosamente"
+    await repo.addCreatorAuditLog({
+      creatorId: profile.id,
+      creatorHandle: profile.handle,
+      adminUserId: req.user.userId,
+      adminName: req.user.name,
+      action: "CREATE",
+      previousData: null,
+      newData: profile,
+      changeSummary: `Creado perfil de creador @${profile.handle} (${profile.displayName}) con plataforma ${profile.primaryPlatform}.`
     });
+    res.status(201).json({ success: true, data: profile, message: "Perfil de creador registrado exitosamente" });
   } catch (err) {
     console.error("[Admin Error] Error registering creator profile:", err);
     res.status(500).json({ success: false, error: "Error interno al registrar perfil de creador" });
+  }
+});
+adminRouter.put("/creators/:id", async (req, res) => {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: "No autorizado" });
+    return;
+  }
+  const parseResult = AdminUpdateCreatorSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    res.status(400).json({ success: false, error: parseResult.error.issues.map((i) => i.message).join(", ") });
+    return;
+  }
+  const repo = getCreatorsRepository();
+  try {
+    const existing = await repo.findCreatorProfileById(req.params.id);
+    if (!existing) {
+      res.status(404).json({ success: false, error: "Perfil de creador no encontrado" });
+      return;
+    }
+    if (parseResult.data.handle && parseResult.data.handle !== existing.handle) {
+      const handleOwner = await repo.findCreatorProfileByHandle(parseResult.data.handle);
+      if (handleOwner && handleOwner.id !== existing.id) {
+        res.status(409).json({ success: false, error: `El identificador @${parseResult.data.handle} ya est\xE1 registrado` });
+        return;
+      }
+    }
+    const updatedProfile = await repo.updateCreatorProfile(req.params.id, parseResult.data);
+    if (!updatedProfile) {
+      res.status(404).json({ success: false, error: "No se pudo actualizar el perfil de creador" });
+      return;
+    }
+    const isVisibilityOnly = Object.keys(parseResult.data).length === 1 && parseResult.data.isPublic !== void 0;
+    await repo.addCreatorAuditLog({
+      creatorId: updatedProfile.id,
+      creatorHandle: updatedProfile.handle,
+      adminUserId: req.user.userId,
+      adminName: req.user.name,
+      action: isVisibilityOnly ? "VISIBILITY_CHANGE" : "UPDATE",
+      previousData: existing,
+      newData: updatedProfile,
+      changeSummary: isVisibilityOnly ? `Cambiado estado de visibilidad a ${parseResult.data.isPublic ? "P\xDABLICO" : "OCULTO"} para @${updatedProfile.handle}.` : `Actualizado perfil de creador @${updatedProfile.handle} (${Object.keys(parseResult.data).join(", ")}).`
+    });
+    res.json({ success: true, data: updatedProfile, message: "Perfil de creador actualizado exitosamente" });
+  } catch (err) {
+    console.error("[Admin Error] Error updating creator profile:", err);
+    res.status(500).json({ success: false, error: "Error interno al actualizar perfil de creador" });
+  }
+});
+adminRouter.get("/creators/:id/history", async (req, res) => {
+  try {
+    const repo = getCreatorsRepository();
+    const logs = await repo.getCreatorAuditLogs(req.params.id, 50);
+    res.json({ success: true, data: logs, creatorId: req.params.id });
+  } catch (err) {
+    console.error("[Admin Error] Error fetching creator history:", err);
+    res.status(500).json({ success: false, error: "Error al consultar historial del creador" });
   }
 });
 adminRouter.get("/users", async (_req, res) => {
   try {
     const authRepo = getAuthRepository();
     if (typeof authRepo.listUsers === "function") {
-      const users = await authRepo.listUsers();
-      res.json({ success: true, data: users });
+      res.json({ success: true, data: await authRepo.listUsers() });
       return;
     }
     res.json({ success: true, data: [] });
   } catch (err) {
-    console.error("[Admin Error] Error listing users for admin:", err);
+    console.error("[Admin Error] Error listing users:", err);
     res.status(500).json({ success: false, error: "Error al consultar lista de usuarios" });
   }
 });
-adminRouter.get("/dashboard", async (_req, res) => {
+adminRouter.get("/storage/status", async (_req, res) => {
   try {
-    const repo = getPlaceRepository();
-    const metrics = await repo.getDashboardMetrics();
+    const r2Status = getR2ConfigStatus();
     res.json({
       success: true,
-      data: metrics,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      storage: r2Status.mode,
+      r2Configured: r2Status.isConfigured,
+      missingConfig: r2Status.missingVariables,
+      bucketName: r2Status.bucketName,
+      publicUrl: r2Status.publicUrl,
+      endpoint: r2Status.endpoint,
+      maxSizeBytes: MAX_AVATAR_SIZE_BYTES,
+      allowedMimeTypes: ALLOWED_MIME_TYPES
     });
   } catch (err) {
-    console.error("[Admin Error] Error fetching admin dashboard metrics:", err);
-    res.status(500).json({ success: false, error: "Error al generar indicadores del panel administrativo" });
+    console.error("[Admin Error] Error querying storage status:", err);
+    res.status(500).json({ success: false, error: "Error al consultar estado de almacenamiento" });
   }
 });
-adminRouter.get("/places", async (req, res) => {
+adminRouter.post("/uploads/avatar", express.raw({ type: ["image/jpeg", "image/png", "image/webp", "application/octet-stream"], limit: "6mb" }), express.json({ limit: "8mb" }), async (req, res) => {
   try {
-    const {
-      search,
-      status,
-      category,
-      localityId,
-      isVerified,
-      page,
-      limit,
-      sortBy,
-      sortOrder
-    } = req.query;
-    const repo = getPlaceRepository();
-    const result = await repo.listPlaces({
-      search: typeof search === "string" ? search : void 0,
-      status: typeof status === "string" ? status : void 0,
-      category: typeof category === "string" ? category : void 0,
-      localityId: typeof localityId === "string" ? localityId : void 0,
-      isVerified: isVerified === "true" ? true : isVerified === "false" ? false : void 0,
-      page: page ? Number(page) : 1,
-      limit: limit ? Number(limit) : 25,
-      sortBy: typeof sortBy === "string" ? sortBy : "updatedAt",
-      sortOrder: sortOrder === "asc" ? "asc" : "desc"
-    });
-    res.json({
-      success: true,
-      data: result.places,
-      total: result.total,
-      page: result.page,
-      totalPages: result.totalPages
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error listing places:", err);
-    res.status(500).json({ success: false, error: "Error al consultar cat\xE1logo administrativo" });
-  }
-});
-adminRouter.get("/places/:id", async (req, res) => {
-  try {
-    const repo = getPlaceRepository();
-    const place = await repo.getPlaceById(req.params.id);
-    if (!place) {
-      res.status(404).json({ success: false, error: "Lugar no encontrado en el cat\xE1logo" });
-      return;
-    }
-    const history = await repo.getAuditLogs(place.id, 20);
-    res.json({
-      success: true,
-      data: {
-        ...place,
-        auditHistory: history
+    let fileBuffer = null;
+    let filename = "avatar.jpg";
+    let mimeType = "image/jpeg";
+    if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+      fileBuffer = req.body;
+      const rawFilename = req.headers["x-filename"];
+      if (rawFilename) {
+        try {
+          filename = decodeURIComponent(rawFilename);
+        } catch {
+          filename = rawFilename;
+        }
       }
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error fetching place details:", err);
-    res.status(500).json({ success: false, error: "Error al consultar detalle del lugar" });
-  }
-});
-adminRouter.post("/places", async (req, res) => {
-  if (!req.user) {
-    res.status(401).json({ success: false, error: "No autorizado" });
-    return;
-  }
-  const parseResult = CreatePlaceSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
-    return;
-  }
-  try {
-    const repo = getPlaceRepository();
-    const created = await repo.createPlace(parseResult.data, req.user.userId, req.user.name);
-    res.status(201).json({
-      success: true,
-      data: created,
-      message: `Lugar "${created.name}" creado exitosamente`
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error creating place:", err);
-    res.status(500).json({ success: false, error: "Error al crear lugar en el cat\xE1logo" });
-  }
-});
-adminRouter.put("/places/:id", async (req, res) => {
-  if (!req.user) {
-    res.status(401).json({ success: false, error: "No autorizado" });
-    return;
-  }
-  const parseResult = UpdatePlaceSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
-    return;
-  }
-  try {
-    const repo = getPlaceRepository();
-    const updated = await repo.updatePlace(
-      req.params.id,
-      parseResult.data,
-      req.user.userId,
-      req.user.name,
-      req.body.changeSummary
-    );
-    if (!updated) {
-      res.status(404).json({ success: false, error: "Lugar no encontrado para actualizar" });
+      mimeType = req.headers["content-type"] || "image/jpeg";
+    } else if (req.body && typeof req.body.imageBase64 === "string") {
+      const cleanBase64 = req.body.imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+      fileBuffer = Buffer.from(cleanBase64, "base64");
+      filename = req.body.filename || "avatar.jpg";
+      mimeType = req.body.mimeType || "image/jpeg";
+    }
+    if (!fileBuffer || fileBuffer.length === 0) {
+      res.status(400).json({ success: false, error: "No se recibi\xF3 ning\xFAn archivo de imagen para cargar" });
       return;
     }
-    res.json({
-      success: true,
-      data: updated,
-      message: `Lugar "${updated.name}" actualizado exitosamente`
-    });
+    const result = await uploadCreatorAvatar(fileBuffer, filename, mimeType);
+    res.status(201).json({ success: true, data: result, message: "Fotograf\xEDa de perfil de creador cargada exitosamente" });
   } catch (err) {
-    console.error("[Admin Error] Error updating place:", err);
-    res.status(500).json({ success: false, error: "Error al actualizar lugar" });
+    console.error("[Admin Error] Error uploading creator avatar:", err);
+    res.status(400).json({ success: false, error: err instanceof Error ? err.message : "Error al procesar la imagen" });
   }
 });
-adminRouter.patch("/places/:id/status", async (req, res) => {
-  if (!req.user) {
-    res.status(401).json({ success: false, error: "No autorizado" });
-    return;
-  }
-  const parseResult = UpdatePlaceStatusSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
+adminRouter.delete("/uploads/avatar", async (req, res) => {
+  const { url } = req.body;
+  if (!url || typeof url !== "string") {
+    res.status(400).json({ success: false, error: "URL requerida para eliminar la imagen" });
     return;
   }
   try {
-    const repo = getPlaceRepository();
-    const updated = await repo.updateStatus(
-      req.params.id,
-      parseResult.data.status,
-      req.user.userId,
-      req.user.name,
-      parseResult.data.reason
-    );
-    if (!updated) {
-      res.status(404).json({ success: false, error: "Lugar no encontrado" });
-      return;
-    }
-    res.json({
-      success: true,
-      data: updated,
-      message: `Estado de "${updated.name}" cambiado a ${parseResult.data.status}`
-    });
+    const deleted = await deleteAvatar(url);
+    res.json({ success: true, deleted });
   } catch (err) {
-    console.error("[Admin Error] Error changing place status:", err);
-    res.status(500).json({ success: false, error: "Error al actualizar estado del lugar" });
-  }
-});
-adminRouter.patch("/places/:id/verify", async (req, res) => {
-  if (!req.user) {
-    res.status(401).json({ success: false, error: "No autorizado" });
-    return;
-  }
-  const parseResult = VerifyPlaceSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
-    return;
-  }
-  try {
-    const repo = getPlaceRepository();
-    const updated = await repo.verifyPlace(
-      req.params.id,
-      parseResult.data.isVerified,
-      parseResult.data.verificationLevel,
-      parseResult.data.notes,
-      req.user.userId,
-      req.user.name
-    );
-    if (!updated) {
-      res.status(404).json({ success: false, error: "Lugar no encontrado" });
-      return;
-    }
-    res.json({
-      success: true,
-      data: updated,
-      message: `Verificaci\xF3n de "${updated.name}" actualizada con \xE9xito`
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error verifying place:", err);
-    res.status(500).json({ success: false, error: "Error al actualizar verificaci\xF3n" });
-  }
-});
-adminRouter.get("/categories", async (_req, res) => {
-  try {
-    const repo = getPlaceRepository();
-    const stats = await repo.getCategoriesStats();
-    res.json({ success: true, data: stats });
-  } catch (err) {
-    console.error("[Admin Error] Error fetching categories stats:", err);
-    res.status(500).json({ success: false, error: "Error al consultar categor\xEDas" });
-  }
-});
-adminRouter.get("/localities", async (_req, res) => {
-  try {
-    const repo = getPlaceRepository();
-    const stats = await repo.getLocalitiesStats();
-    res.json({ success: true, data: stats });
-  } catch (err) {
-    console.error("[Admin Error] Error fetching localities stats:", err);
-    res.status(500).json({ success: false, error: "Error al consultar localidades" });
-  }
-});
-adminRouter.get("/sources", async (_req, res) => {
-  try {
-    const repo = getPlaceRepository();
-    const stats = await repo.getSourcesStats();
-    res.json({ success: true, data: stats });
-  } catch (err) {
-    console.error("[Admin Error] Error fetching sources stats:", err);
-    res.status(500).json({ success: false, error: "Error al consultar fuentes de datos" });
-  }
-});
-adminRouter.get("/duplicates", async (_req, res) => {
-  try {
-    const repo = getPlaceRepository();
-    const duplicates = await repo.findDuplicates();
-    res.json({
-      success: true,
-      data: duplicates,
-      total: duplicates.length
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error detecting duplicates:", err);
-    res.status(500).json({ success: false, error: "Error al identificar duplicados" });
-  }
-});
-adminRouter.post("/duplicates/merge", async (req, res) => {
-  if (!req.user) {
-    res.status(401).json({ success: false, error: "No autorizado" });
-    return;
-  }
-  const parseResult = MergeDuplicatesSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
-    res.status(400).json({ success: false, error: errorMsg });
-    return;
-  }
-  try {
-    const repo = getPlaceRepository();
-    const result = await repo.mergeDuplicates(
-      parseResult.data.primaryId,
-      parseResult.data.duplicateIds,
-      req.user.userId,
-      req.user.name
-    );
-    res.json({
-      success: true,
-      data: result.primaryPlace,
-      mergedCount: result.mergedCount,
-      message: `Fusi\xF3n completada: ${result.mergedCount} lugar(es) fusionado(s) exitosamente`
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error merging duplicates:", err);
-    res.status(500).json({
-      success: false,
-      error: err instanceof Error ? err.message : "Error al fusionar lugares duplicados"
-    });
-  }
-});
-adminRouter.get("/audit", async (req, res) => {
-  try {
-    const repo = getPlaceRepository();
-    const placeId = typeof req.query.placeId === "string" ? req.query.placeId : void 0;
-    const limit = req.query.limit ? Number(req.query.limit) : 50;
-    const logs = await repo.getAuditLogs(placeId, limit);
-    res.json({
-      success: true,
-      data: logs,
-      total: logs.length
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error fetching audit trail:", err);
-    res.status(500).json({ success: false, error: "Error al consultar registro de auditor\xEDa" });
-  }
-});
-adminRouter.get("/places/:id/history", async (req, res) => {
-  try {
-    const repo = getPlaceRepository();
-    const logs = await repo.getAuditLogs(req.params.id, 50);
-    res.json({
-      success: true,
-      data: logs,
-      placeId: req.params.id
-    });
-  } catch (err) {
-    console.error("[Admin Error] Error fetching place history:", err);
-    res.status(500).json({ success: false, error: "Error al consultar historial del lugar" });
+    console.error("[Admin Error] Error deleting avatar:", err);
+    res.status(500).json({ success: false, error: "Error al eliminar imagen" });
   }
 });
 
@@ -53399,7 +54393,9 @@ apiRouter.get("/route", async (req, res) => {
     return;
   }
   try {
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`;
+    const rawProfile = typeof req.query.profile === "string" ? req.query.profile.trim().toLowerCase() : "driving";
+    const osrmProfile = rawProfile === "walking" || rawProfile === "foot" ? "foot" : "driving";
+    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${coordinates}?overview=full&geometries=geojson`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6e3);
     const osrmResponse = await fetch(osrmUrl, {
@@ -53634,8 +54630,9 @@ apiRouter.post("/ai/chat", async (req, res) => {
 
 // server.ts
 init_repositories();
-var __filename = fileURLToPath(import.meta.url);
-var __dirname = path.dirname(__filename);
+process.env.DISABLE_HMR = "true";
+var __filename2 = fileURLToPath2(import.meta.url);
+var __dirname2 = path2.dirname(__filename2);
 var isShuttingDown = false;
 function registerGracefulShutdown(server) {
   const shutdown = async (signal) => {
@@ -53676,15 +54673,27 @@ function registerGracefulShutdown(server) {
   });
 }
 async function startServer() {
-  const app = express();
-  const portArgIndex = process.argv.indexOf("--port");
-  const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? Number(process.argv[portArgIndex + 1]) : null;
-  const hostArgIndex = process.argv.indexOf("--host");
-  const cliHost = hostArgIndex !== -1 && process.argv[hostArgIndex + 1] ? process.argv[hostArgIndex + 1] : null;
+  const app = express2();
+  let cliPort = null;
+  let cliHost = "0.0.0.0";
+  for (let i = 2; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === "--port" && process.argv[i + 1]) {
+      cliPort = Number(process.argv[i + 1]);
+      i++;
+    } else if (arg.startsWith("--port=")) {
+      cliPort = Number(arg.split("=")[1]);
+    } else if (arg === "--host" && process.argv[i + 1]) {
+      cliHost = process.argv[i + 1];
+      i++;
+    } else if (arg.startsWith("--host=")) {
+      cliHost = arg.split("=")[1];
+    }
+  }
   const PORT = cliPort && !isNaN(cliPort) ? cliPort : process.env.NODE_ENV === "production" && process.env.PORT ? Number(process.env.PORT) : 3e3;
   const HOST = cliHost || "0.0.0.0";
-  const distPath = path.resolve(__dirname, "dist");
-  const isProduction2 = process.env.NODE_ENV === "production" && fs.existsSync(path.join(distPath, "index.html"));
+  const distPath = path2.resolve(__dirname2, "dist");
+  const isProduction2 = process.env.NODE_ENV === "production" && fs2.existsSync(path2.join(distPath, "index.html"));
   let configError = null;
   try {
     validateSecurityConfig();
@@ -53703,7 +54712,7 @@ async function startServer() {
       console.log(`[LibertadGO Dev Startup Note] ${errorMsg}`);
     }
   }
-  app.use(express.json());
+  app.use(express2.json({ limit: "200kb" }));
   app.use(csrfProtectionMiddleware);
   const handleHealthCheck = async (_req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -53727,16 +54736,16 @@ async function startServer() {
     });
   }
   app.use("/api", apiRouter);
-  app.use(express.static(path.resolve(__dirname, "public")));
+  app.use(express2.static(path2.resolve(__dirname2, "public")));
   if (isProduction2) {
-    app.use(express.static(distPath));
+    app.use(express2.static(distPath));
     app.get("*", (req, res) => {
       if (req.path.startsWith("/api")) {
         res.setHeader("Content-Type", "application/json");
         res.status(404).json({ success: false, error: "Endpoint API no encontrado" });
         return;
       }
-      res.sendFile(path.join(distPath, "index.html"));
+      res.sendFile(path2.join(distPath, "index.html"));
     });
   } else {
     app.use("/api", (_req, res) => {
@@ -53769,7 +54778,11 @@ async function startServer() {
     console.error("[LibertadGO] HTTP server error:", err.message);
     if (err.code === "EADDRINUSE") {
       console.error(`[LibertadGO] Port ${PORT} is already in use.`);
+      process.exit(1);
     }
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.warn("[LibertadGO Warning] Unhandled Rejection:", reason);
   });
   registerGracefulShutdown(server);
 }

@@ -3,6 +3,7 @@ import { MapPin, Calendar, ArrowRight, X, AlertCircle, Check } from 'lucide-reac
 import { LA_LIBERTAD_LOCALITIES } from '../types/geo.ts';
 import { calculateOptionalTripDates, formatDateRange } from '../utils/dateUtils.ts';
 import { TripItinerary } from '../types/catalog.ts';
+import { DateRangePicker } from './common/DateRangePicker.tsx';
 
 interface CreateTripModalProps {
   isOpen: boolean;
@@ -209,39 +210,21 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           </div>
 
           {/* Fechas (opcionales) */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label htmlFor="modal-start-date" className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
-                Llegada <span className="text-[#64748B] font-normal lowercase">(opcional)</span>
-              </label>
-              <input
-                id="modal-start-date"
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setErrorMsg(null);
-                }}
-                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md font-mono text-[#263B35] focus:outline-none focus:border-[#E85B49]"
-              />
-            </div>
-            <div>
-              <label htmlFor="modal-end-date" className="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1">
-                Salida <span className="text-[#64748B] font-normal lowercase">(opcional)</span>
-              </label>
-              <input
-                id="modal-end-date"
-                type="date"
-                value={endDate}
-                min={startDate || undefined}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setErrorMsg(null);
-                }}
-                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#E9E7E1] rounded-md font-mono text-[#263B35] focus:outline-none focus:border-[#E85B49]"
-              />
-            </div>
-          </div>
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={({ startDate: nextStart, endDate: nextEnd }) => {
+              setStartDate(nextStart);
+              setEndDate(nextEnd);
+              setErrorMsg(null);
+            }}
+            startLabel="Llegada (opcional)"
+            endLabel="Salida (opcional)"
+            startId="modal-start-date"
+            endId="modal-end-date"
+            labelClassName="block text-[11px] font-semibold text-[#263B35] uppercase tracking-wider mb-1"
+            gapClassName="gap-2.5"
+          />
 
           {/* Resumen */}
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#F7F2E8] rounded-md border border-[#E9E7E1] text-xs">

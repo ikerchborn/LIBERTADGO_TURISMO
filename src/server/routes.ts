@@ -176,7 +176,9 @@ apiRouter.get('/route', async (req: Request, res: Response) => {
   }
 
   try {
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`;
+    const rawProfile = typeof req.query.profile === 'string' ? req.query.profile.trim().toLowerCase() : 'driving';
+    const osrmProfile = rawProfile === 'walking' || rawProfile === 'foot' ? 'foot' : 'driving';
+    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${coordinates}?overview=full&geometries=geojson`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
 

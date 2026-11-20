@@ -113,6 +113,111 @@ export function formatDateRange(startDateStr: string, endDateStr: string): strin
   return `${startDay} ${startMonth} ${startYear} – ${endDay} ${endMonth} ${endYear}`;
 }
 
+export interface CalendarDayCell {
+  dateString: string; // YYYY-MM-DD
+  dayNumber: number;
+  isCurrentMonth: boolean;
+}
+
+const SPANISH_MONTHS_SHORT = [
+  'ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.',
+  'jul.', 'ago.', 'set.', 'oct.', 'nov.', 'dic.',
+];
+
+const SPANISH_MONTHS_FULL = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+];
+
+function formatUtcDateParts(year: number, monthIndex0: number, day: number): string {
+  const mm = String(monthIndex0 + 1).padStart(2, '0');
+  const dd = String(day).padStart(2, '0');
+  return `${year}-${mm}-${dd}`;
+}
+
+/**
+ * Formats a single YYYY-MM-DD date string in clean Spanish, e.g. "27 nov. 2026".
+ * Strictly timezone-safe using parsed parts.
+ */
+export function formatSingleDateShort(dateStr: string): string {
+  const parts = parseDateParts(dateStr);
+  if (!parts) return '';
+  const [year, monthNum, day] = parts;
+  const month = SPANISH_MONTHS_SHORT[monthNum - 1] || '';
+  return `${day} ${month} ${year}`;
+}
+
+/**
+ * Returns capitalized Spanish month and year, e.g. "Noviembre 2026".
+ */
+export function getSpanishMonthYear(year: number, monthIndex0: number): string {
+  const monthName = SPANISH_MONTHS_FULL[monthIndex0] || '';
+  return `${monthName} ${year}`;
+}
+
+/**
+ * Generates a Monday-first calendar grid (Lu - Do) for the given year and 0-indexed month.
+ * Strictly timezone-safe using UTC arithmetic.
+ */
+export function getCalendarGridDays(year: number, monthIndex0: number): CalendarDayCell[] {
+  const firstDayUtc = new Date(Date.UTC(year, monthIndex0, 1));
+  const daysInMonth = new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+  const mondayOffset = (firstDayUtc.getUTCDay() + 6) % 7;
+
+  const cells: CalendarDayCell[] = [];
+
+  if (mondayOffset > 0) {
+    const prevMonthLastDate = new Date(Date.UTC(year, monthIndex0, 0));
+    const prevYear = prevMonthLastDate.getUTCFullYear();
+    const prevMonth = prevMonthLastDate.getUTCMonth();
+    const prevMonthDays = prevMonthLastDate.getUTCDate();
+
+    for (let i = mondayOffset - 1; i >= 0; i--) {
+      const dayNumber = prevMonthDays - i;
+      cells.push({
+        dateString: formatUtcDateParts(prevYear, prevMonth, dayNumber),
+        dayNumber,
+        isCurrentMonth: false,
+      });
+    }
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    cells.push({
+      dateString: formatUtcDateParts(year, monthIndex0, day),
+      dayNumber: day,
+      isCurrentMonth: true,
+    });
+  }
+
+  const remainder = cells.length % 7;
+  if (remainder !== 0) {
+    const trailingCount = 7 - remainder;
+    const nextMonthFirstDate = new Date(Date.UTC(year, monthIndex0 + 1, 1));
+    const nextYear = nextMonthFirstDate.getUTCFullYear();
+    const nextMonth = nextMonthFirstDate.getUTCMonth();
+
+    for (let day = 1; day <= trailingCount; day++) {
+      cells.push({
+        dateString: formatUtcDateParts(nextYear, nextMonth, day),
+        dayNumber: day,
+        isCurrentMonth: false,
+      });
+    }
+  }
+
+  return cells;
+}
+
+/**
+ * Parses a YYYY-MM-DD string into [year, monthIndex0, day] if valid.
+ */
+export function getYearMonthFromDateString(dateStr: string): { year: number; monthIndex0: number } | null {
+  const parts = parseDateParts(dateStr);
+  if (!parts) return null;
+  return { year: parts[0], monthIndex0: parts[1] - 1 };
+}
+
 export const DEFAULT_FLEXIBLE_DAYS = 3;
 
 export interface OptionalTripDatesResult extends TripDurationResult {

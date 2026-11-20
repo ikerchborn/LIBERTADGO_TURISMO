@@ -10,6 +10,7 @@ import {
 import { LA_LIBERTAD_LOCALITIES, Locality } from '../types/geo.ts';
 import { calculateOptionalTripDates, formatDateRange } from '../utils/dateUtils.ts';
 import { TripItinerary } from '../types/catalog.ts';
+import { DateRangePicker } from './common/DateRangePicker.tsx';
 import { RiyMoLogo } from './common/RiyMoLogo.tsx';
 
 export interface PublicTopHeaderProps {
@@ -383,50 +384,21 @@ export const TripCreationScreen: React.FC<TripCreationScreenProps> = ({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="trip-start-date"
-                    className="block text-xs text-[#64748B] mb-1"
-                  >
-                    Fecha de inicio
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="trip-start-date"
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => {
-                        setStartDate(e.target.value);
-                        setErrorMsg(null);
-                      }}
-                      className="w-full h-11 px-3 text-sm bg-white border border-[#E9E7E1] hover:border-[#263B35]/40 focus:border-[#E85B49] focus:ring-2 focus:ring-[#E85B49]/15 rounded-xl text-[#263B35] font-mono focus:outline-none transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="trip-end-date"
-                    className="block text-xs text-[#64748B] mb-1"
-                  >
-                    Fecha de fin
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="trip-end-date"
-                      type="date"
-                      value={endDate}
-                      min={startDate || undefined}
-                      onChange={(e) => {
-                        setEndDate(e.target.value);
-                        setErrorMsg(null);
-                      }}
-                      className="w-full h-11 px-3 text-sm bg-white border border-[#E9E7E1] hover:border-[#263B35]/40 focus:border-[#E85B49] focus:ring-2 focus:ring-[#E85B49]/15 rounded-xl text-[#263B35] font-mono focus:outline-none transition-all"
-                    />
-                  </div>
-                </div>
-              </div>
+              <DateRangePicker
+                startDate={startDate}
+                endDate={endDate}
+                onChange={({ startDate: nextStart, endDate: nextEnd }) => {
+                  setStartDate(nextStart);
+                  setEndDate(nextEnd);
+                  setErrorMsg(null);
+                }}
+                startLabel="Fecha de llegada"
+                endLabel="Fecha de salida"
+                startId="trip-start-date"
+                endId="trip-end-date"
+                labelClassName="block text-xs text-[#64748B] mb-1"
+                gapClassName="gap-3"
+              />
 
               {optionalDates.hasDates && dateRangeFormatted && (
                 <div className="flex items-center gap-2 text-xs text-[#263B35] bg-[#F7F2E8] border border-[#E9E7E1] rounded-lg px-3 py-2">

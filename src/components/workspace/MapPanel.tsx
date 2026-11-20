@@ -33,7 +33,9 @@ import {
   RefreshCw,
   ChevronLeft,
   Calendar,
-  Compass
+  Compass,
+  Bus,
+  Car
 } from 'lucide-react';
 import { PlaceImage } from '../common/PlaceImage.tsx';
 import {
@@ -45,6 +47,11 @@ import {
 } from '../../utils/filterUtils.ts';
 import { getDayColor } from '../../utils/itineraryUtils.ts';
 import { calculateRealRoute, RouteData } from '../../utils/routingService.ts';
+import {
+  resolveTransitBetweenPlaces,
+  type TransitOption,
+} from '../../utils/transitService.ts';
+import { getWalkingRoute } from '../../utils/transitGeo.ts';
 import { WorkspaceSection } from './WorkspaceSidebar.tsx';
 import { HorizontalScrollContainer } from '../common/HorizontalScrollContainer.tsx';
 import { PlaceVideosSection } from '../common/PlaceVideosSection.tsx';
@@ -118,6 +125,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const transitStopMarkersRef = useRef<maplibregl.Marker[]>([]);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   // Scroll suave al filtro de categoría seleccionado en modo Explorar
@@ -164,6 +172,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const [mapError, setMapError] = useState<string | null>(null);
   const [currentZoom, setCurrentZoom] = useState<number>(initialZoom);
   const [showRoutes, setShowRoutes] = useState<boolean>(true);
+  const [routeMode, setRouteMode] = useState<'driving' | 'transit'>('transit');
+  const [transitSummary, setTransitSummary] = useState<{
+    legCount: number;
+    totalFarePen: number;
+    totalMinutes: number;
+  } | null>(null);
   const [routeStatus, setRouteStatus] = useState<{
     isLoading: boolean;
     data: RouteData | null;
@@ -327,6 +341,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     if (mapInstanceRef.current) {
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+      transitStopMarkersRef.current.forEach((m) => m.remove());
+      transitStopMarkersRef.current = [];
       if (userMarkerRef.current) {
         userMarkerRef.current.remove();
         userMarkerRef.current = null;
@@ -423,7 +439,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             },
           });
 
-          // Route line (Nature Green #71958B with Coral highlight)
+          // Route line (Coral #E85B49 or transit line color)
           map.addLayer({
             id: 'itinerary-route-line',
             type: 'line',
@@ -433,9 +449,35 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               'line-cap': 'round',
             },
             paint: {
-              'line-color': ['coalesce', ['get', 'color'], '#71958B'],
-              'line-width': 3.5,
+              'line-color': ['coalesce', ['get', 'color'], '#E85B49'],
+              'line-width': 4,
               'line-dasharray': [1, 0],
+            },
+          });
+        }
+
+        if (!map.getSource('itinerary-walk-connectors')) {
+          map.addSource('itinerary-walk-connectors', {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: [],
+            },
+          });
+
+          map.addLayer({
+            id: 'itinerary-walk-connectors-line',
+            type: 'line',
+            source: 'itinerary-walk-connectors',
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+            },
+            paint: {
+              'line-color': '#0F766E',
+              'line-width': 2.5,
+              'line-dasharray': [2, 2],
+              'line-opacity': 0.85,
             },
           });
         }
@@ -514,12 +556,20 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     if (!map || !mapLoaded) return;
 
     const source = map.getSource('itinerary-route') as maplibregl.GeoJSONSource | undefined;
+    const walkSource = map.getSource('itinerary-walk-connectors') as maplibregl.GeoJSONSource | undefined;
     if (!source) return;
 
     let isCancelled = false;
 
+    const clearTransitStopMarkers = () => {
+      transitStopMarkersRef.current.forEach((m) => m.remove());
+      transitStopMarkersRef.current = [];
+    };
+
     async function updateItineraryRoutes() {
-      if (!source) return;
+      if (!source || !map) return;
+
+      clearTransitStopMarkers();
 
       if (!isItineraryMode || !trip) {
         // En MODO EXPLORAR o sin viaje activo no se dibujan líneas de itinerario para mantener el mapa despejado
@@ -527,6 +577,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           type: 'FeatureCollection',
           features: [],
         });
+        walkSource?.setData({
+          type: 'FeatureCollection',
+          features: [],
+        });
+        setTransitSummary(null);
         setRouteStatus({
           isLoading: false,
           data: null,
@@ -542,6 +597,391 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         geometry: { type: 'LineString'; coordinates: [number, number][] };
         properties: { color?: string };
       }[] = [];
+
+      const walkFeatures: {
+        type: 'Feature';
+        geometry: { type: 'LineString'; coordinates: [number, number][] };
+        properties: Record<string, never>;
+      }[] = [];
+
+      if (routeMode === 'transit') {
+        const targetDays = selectedDayNumber
+          ? dayItems.filter((d) => d.dayNumber === selectedDayNumber)
+          : dayItems;
+
+        const pairs: Array<{ origin: Place; destination: Place; dayNumber: number }> = [];
+        for (const day of targetDays) {
+          const dayActivities = trip.activities
+            .filter((a) => a.dayNumber === day.dayNumber)
+            .sort((a, b) => a.order - b.order);
+          const dayPlaces = dayActivities
+            .map((act) => act.place || places.find((p) => p.id === act.placeId))
+            .filter((p): p is Place => Boolean(p?.coordinates));
+          for (let i = 0; i < dayPlaces.length - 1; i += 1) {
+            pairs.push({
+              origin: dayPlaces[i],
+              destination: dayPlaces[i + 1],
+              dayNumber: day.dayNumber,
+            });
+          }
+        }
+
+        if (pairs.length === 0) {
+          source.setData({ type: 'FeatureCollection', features: [] });
+          walkSource?.setData({ type: 'FeatureCollection', features: [] });
+          setTransitSummary(null);
+          setRouteStatus({
+            isLoading: false,
+            data: null,
+            dayNumber: selectedDayNumber,
+            isUnavailable: false,
+            totalPoints: 0,
+          });
+          return;
+        }
+
+        setRouteStatus({
+          isLoading: true,
+          data: null,
+          dayNumber: selectedDayNumber,
+          isUnavailable: false,
+          totalPoints: pairs.length + 1,
+        });
+
+        const escapeHtml = (value: string): string =>
+          value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+        let resolvedLegs: Array<{ origin: Place; destination: Place; transit: TransitOption }> = [];
+        try {
+          resolvedLegs = await Promise.all(
+            pairs.map(async (pair) => {
+              let transit = await resolveTransitBetweenPlaces(pair.origin, pair.destination);
+
+              const needsRoadFallback =
+                transit.vehicleType !== 'caminata' &&
+                (!transit.routeGeometry || transit.routeGeometry.length < 2) &&
+                (!transit.routeLegs || transit.routeLegs.length === 0) &&
+                (transit.boardingPoint[0] !== transit.dropoffPoint[0] ||
+                  transit.boardingPoint[1] !== transit.dropoffPoint[1]);
+
+              const needsBoardingWalk =
+                transit.vehicleType !== 'caminata' &&
+                transit.vehicleType !== 'taxi' &&
+                (!transit.boardingWalkGeometry || transit.boardingWalkGeometry.length < 2);
+
+              const needsDropoffWalk =
+                transit.vehicleType !== 'caminata' &&
+                transit.vehicleType !== 'taxi' &&
+                (!transit.dropoffWalkGeometry || transit.dropoffWalkGeometry.length < 2);
+
+              if (needsRoadFallback || needsBoardingWalk || needsDropoffWalk) {
+                const [roadFallback, boardingWalk, dropoffWalk] = await Promise.all([
+                  needsRoadFallback
+                    ? calculateRealRoute([
+                        [transit.boardingPoint[1], transit.boardingPoint[0]],
+                        [transit.dropoffPoint[1], transit.dropoffPoint[0]],
+                      ])
+                    : Promise.resolve(null),
+                  needsBoardingWalk
+                    ? getWalkingRoute(
+                        [pair.origin.coordinates.lat, pair.origin.coordinates.lng],
+                        transit.boardingPoint
+                      )
+                    : Promise.resolve(null),
+                  needsDropoffWalk
+                    ? getWalkingRoute(transit.dropoffPoint, [
+                        pair.destination.coordinates.lat,
+                        pair.destination.coordinates.lng,
+                      ])
+                    : Promise.resolve(null),
+                ]);
+
+                transit = {
+                  ...transit,
+                  ...(roadFallback && roadFallback.coordinates.length >= 2
+                    ? {
+                        routeGeometry: roadFallback.coordinates.map(
+                          ([lng, lat]) => [lat, lng] as [number, number]
+                        ),
+                      }
+                    : {}),
+                  ...(boardingWalk &&
+                  !boardingWalk.isFallback &&
+                  boardingWalk.coordinates.length >= 2
+                    ? { boardingWalkGeometry: boardingWalk.coordinates }
+                    : {}),
+                  ...(dropoffWalk &&
+                  !dropoffWalk.isFallback &&
+                  dropoffWalk.coordinates.length >= 2
+                    ? { dropoffWalkGeometry: dropoffWalk.coordinates }
+                    : {}),
+                };
+              }
+
+              return { ...pair, transit };
+            })
+          );
+        } catch (err) {
+          console.warn('[MapPanel] Error resolving transit legs:', err);
+          if (!isCancelled) {
+            source.setData({ type: 'FeatureCollection', features: [] });
+            walkSource?.setData({ type: 'FeatureCollection', features: [] });
+            setTransitSummary(null);
+            setRouteStatus({
+              isLoading: false,
+              data: null,
+              dayNumber: selectedDayNumber,
+              isUnavailable: true,
+              totalPoints: pairs.length + 1,
+            });
+          }
+          return;
+        }
+        if (isCancelled) return;
+
+        let totalFarePen = 0;
+        let totalMinutes = 0;
+
+        resolvedLegs.forEach(({ origin, destination, transit }) => {
+          totalFarePen += transit.farePen;
+          totalMinutes += transit.estimatedMinutes + transit.waitMinutes;
+
+          if (!showRoutes) return;
+
+          if (transit.routeLegs && transit.routeLegs.length > 0) {
+            transit.routeLegs.forEach((leg, legIndex) => {
+              const legCoords =
+                leg.routeGeometry && leg.routeGeometry.length >= 2
+                  ? leg.routeGeometry.map(([lat, lng]) => [lng, lat] as [number, number])
+                  : ([
+                      [leg.boardingPoint[1], leg.boardingPoint[0]],
+                      [leg.dropoffPoint[1], leg.dropoffPoint[0]],
+                    ] as [number, number][]);
+              features.push({
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: legCoords,
+                },
+                properties: {
+                  color: leg.badgeColor ?? leg.routeColor ?? '#D97706',
+                },
+              });
+
+              if (legIndex > 0) {
+                const prevLeg = transit.routeLegs![legIndex - 1];
+                if (
+                  prevLeg.dropoffPoint[0] !== leg.boardingPoint[0] ||
+                  prevLeg.dropoffPoint[1] !== leg.boardingPoint[1]
+                ) {
+                  walkFeatures.push({
+                    type: 'Feature',
+                    geometry: {
+                      type: 'LineString',
+                      coordinates: [
+                        [prevLeg.dropoffPoint[1], prevLeg.dropoffPoint[0]],
+                        [leg.boardingPoint[1], leg.boardingPoint[0]],
+                      ],
+                    },
+                    properties: {},
+                  });
+                }
+              }
+            });
+          } else if (transit.routeGeometry && transit.routeGeometry.length >= 2) {
+            features.push({
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: transit.routeGeometry.map(([lat, lng]) => [lng, lat]),
+              },
+              properties: {
+                color:
+                  transit.vehicleType === 'caminata'
+                    ? '#059669'
+                    : transit.badgeColor ?? transit.routeColor ?? '#D97706',
+              },
+            });
+          } else if (
+            transit.boardingPoint[0] !== transit.dropoffPoint[0] ||
+            transit.boardingPoint[1] !== transit.dropoffPoint[1]
+          ) {
+            features.push({
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [transit.boardingPoint[1], transit.boardingPoint[0]],
+                  [transit.dropoffPoint[1], transit.dropoffPoint[0]],
+                ],
+              },
+              properties: {
+                color:
+                  transit.vehicleType === 'caminata'
+                    ? '#059669'
+                    : transit.vehicleType === 'taxi'
+                      ? '#A16207'
+                      : transit.badgeColor ?? transit.routeColor ?? '#D97706',
+              },
+            });
+          }
+
+          if (transit.vehicleType !== 'caminata' && transit.vehicleType !== 'taxi') {
+            const boardingWalkCoords: [number, number][] =
+              transit.boardingWalkGeometry && transit.boardingWalkGeometry.length >= 2
+                ? transit.boardingWalkGeometry.map(([lat, lng]) => [lng, lat])
+                : [
+                    [origin.coordinates.lng, origin.coordinates.lat],
+                    [transit.boardingPoint[1], transit.boardingPoint[0]],
+                  ];
+            const dropoffWalkCoords: [number, number][] =
+              transit.dropoffWalkGeometry && transit.dropoffWalkGeometry.length >= 2
+                ? transit.dropoffWalkGeometry.map(([lat, lng]) => [lng, lat])
+                : [
+                    [transit.dropoffPoint[1], transit.dropoffPoint[0]],
+                    [destination.coordinates.lng, destination.coordinates.lat],
+                  ];
+
+            walkFeatures.push(
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: boardingWalkCoords,
+                },
+                properties: {},
+              },
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: dropoffWalkCoords,
+                },
+                properties: {},
+              }
+            );
+
+            const createStopMarker = (
+              action: 'Sube' | 'Transbordo' | 'Baja',
+              point: [number, number],
+              stopName: string,
+              codeLabel: string,
+              serviceLabel: string,
+              farePen: number,
+              badgeColor?: string,
+              hint?: string
+            ) => {
+              const el = document.createElement('button');
+              el.type = 'button';
+              el.setAttribute('aria-label', `${action} en ${stopName}, ${serviceLabel}`);
+              el.className = 'flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold text-white shadow-md border border-white cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#17243A] focus-visible:ring-offset-1';
+              el.style.backgroundColor =
+                action === 'Baja'
+                  ? '#0F766E'
+                  : badgeColor ?? (action === 'Transbordo' ? '#B45309' : '#1D4ED8');
+              el.textContent = `${action}: ${codeLabel}`;
+
+              const popup = new maplibregl.Popup({ offset: 14, closeButton: false }).setHTML(
+                `<div style="font-family:var(--font-sans,system-ui,sans-serif);font-size:12px;max-width:220px;">
+                  <div style="font-weight:700;color:#17243A;margin-bottom:2px;">${escapeHtml(action)} en ${escapeHtml(stopName)}</div>
+                  <div style="color:#475569;font-size:11px;">${escapeHtml(serviceLabel)} (${escapeHtml(codeLabel)})</div>
+                  ${hint ? `<div style="color:#64748B;font-size:10px;margin-top:2px;">Ref: ${escapeHtml(hint)}</div>` : ''}
+                  <div style="color:#047857;font-weight:700;font-size:11px;margin-top:4px;">Pasaje: S/ ${farePen.toFixed(2)}</div>
+                </div>`
+              );
+
+              const marker = new maplibregl.Marker({ element: el })
+                .setLngLat([point[1], point[0]])
+                .setPopup(popup)
+                .addTo(map);
+              transitStopMarkersRef.current.push(marker);
+            };
+
+            if (showRoutes) {
+              if (transit.routeLegs && transit.routeLegs.length > 1) {
+                transit.routeLegs.forEach((leg, legIndex) => {
+                  createStopMarker(
+                    legIndex === 0 ? 'Sube' : 'Transbordo',
+                    leg.boardingPoint,
+                    leg.boardingStop,
+                    leg.routeCode ?? leg.code,
+                    leg.companyName ?? leg.serviceName,
+                    leg.farePen,
+                    leg.badgeColor,
+                    leg.boardingLandmarkHint
+                  );
+                });
+                const lastLeg = transit.routeLegs[transit.routeLegs.length - 1];
+                createStopMarker(
+                  'Baja',
+                  lastLeg.dropoffPoint,
+                  lastLeg.dropoffStop,
+                  lastLeg.routeCode ?? lastLeg.code,
+                  lastLeg.companyName ?? lastLeg.serviceName,
+                  transit.farePen,
+                  lastLeg.badgeColor,
+                  lastLeg.dropoffLandmarkHint
+                );
+              } else {
+                createStopMarker(
+                  'Sube',
+                  transit.boardingPoint,
+                  transit.boardingStop,
+                  transit.routeCode ?? transit.code,
+                  transit.companyName ?? transit.serviceName,
+                  transit.farePen,
+                  transit.badgeColor,
+                  transit.boardingLandmarkHint
+                );
+                createStopMarker(
+                  'Baja',
+                  transit.dropoffPoint,
+                  transit.dropoffStop,
+                  transit.routeCode ?? transit.code,
+                  transit.companyName ?? transit.serviceName,
+                  transit.farePen,
+                  transit.badgeColor,
+                  transit.dropoffLandmarkHint
+                );
+              }
+            }
+          }
+        });
+
+        setTransitSummary({
+          legCount: resolvedLegs.length,
+          totalFarePen,
+          totalMinutes,
+        });
+        setRouteStatus({
+          isLoading: false,
+          data: null,
+          dayNumber: selectedDayNumber,
+          isUnavailable: false,
+          totalPoints: pairs.length + 1,
+        });
+
+        source.setData({
+          type: 'FeatureCollection',
+          features: showRoutes ? features : [],
+        });
+        walkSource?.setData({
+          type: 'FeatureCollection',
+          features: showRoutes ? walkFeatures : [],
+        });
+        return;
+      }
+
+      setTransitSummary(null);
+      walkSource?.setData({
+        type: 'FeatureCollection',
+        features: [],
+      });
 
       if (selectedDayNumber) {
         // Modo Día individual: recorrido exclusivo de la jornada seleccionada
@@ -678,8 +1118,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
     return () => {
       isCancelled = true;
+      clearTransitStopMarkers();
     };
-  }, [trip, tripActivities, places, mapLoaded, showRoutes, selectedDayNumber, dayItems, isItineraryMode]);
+  }, [trip, tripActivities, places, mapLoaded, showRoutes, selectedDayNumber, dayItems, isItineraryMode, routeMode]);
 
   // ==========================================
   // RENDERIZADO REACTIVO DE MARCADORES (FASE 3)
@@ -1415,18 +1856,111 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 })}
               </HorizontalScrollContainer>
 
-              {/* Indicador de estado para el día seleccionado en Planificar */}
-              {selectedDayNumber && (
-                <div className="flex items-center gap-1.5 bg-[#17243A]/90 backdrop-blur-md text-white text-[11px] font-medium px-3 py-1.5 rounded-xl shadow-xs self-start">
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: getDayColor(selectedDayNumber).bg }}
-                  />
-                  <span>
-                    Día {selectedDayNumber}: {tripActivities.filter((a) => a.dayNumber === selectedDayNumber).length} actividades programadas
-                  </span>
+              {/* Fila de estado del día, selector Micro/Auto y resumen de ruta (sin superposiciones) */}
+              <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
+                {selectedDayNumber && (
+                  <div className="flex items-center gap-1.5 bg-[#17243A]/90 backdrop-blur-md text-white text-[11px] font-medium px-3 py-1.5 rounded-full shadow-xs whitespace-nowrap">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: getDayColor(selectedDayNumber).bg }}
+                    />
+                    <span>
+                      Día {selectedDayNumber}: {tripActivities.filter((a) => a.dayNumber === selectedDayNumber).length} act.
+                    </span>
+                  </div>
+                )}
+
+                <div
+                  role="group"
+                  aria-label="Modo de traslado en mapa"
+                  className="inline-flex items-center p-0.5 rounded-full bg-white/95 backdrop-blur-xs border border-[#E2E8F0] shadow-xs text-[11px] font-semibold"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={routeMode === 'transit'}
+                    onClick={() => setRouteMode('transit')}
+                    className={`px-2.5 py-1 rounded-full transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#17243A] ${
+                      routeMode === 'transit'
+                        ? 'bg-[#17243A] text-white shadow-2xs'
+                        : 'text-[#475569] hover:text-[#17243A]'
+                    }`}
+                  >
+                    <Bus className="w-3 h-3 shrink-0" />
+                    <span>Micro / Bus</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={routeMode === 'driving'}
+                    onClick={() => setRouteMode('driving')}
+                    className={`px-2.5 py-1 rounded-full transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#17243A] ${
+                      routeMode === 'driving'
+                        ? 'bg-[#17243A] text-white shadow-2xs'
+                        : 'text-[#475569] hover:text-[#17243A]'
+                    }`}
+                  >
+                    <Car className="w-3 h-3 shrink-0" />
+                    <span>Auto</span>
+                  </button>
                 </div>
-              )}
+
+                {routeStatus.isLoading && (
+                  <div className="px-3 py-1.5 bg-[#17243A]/90 backdrop-blur-xs text-white text-[11px] font-medium rounded-full shadow-xs flex items-center gap-1.5 border border-slate-700 whitespace-nowrap">
+                    <RefreshCw className="w-3 h-3 text-[#E85B49] motion-safe:animate-spin shrink-0" />
+                    <span>
+                      {routeMode === 'transit'
+                        ? 'Buscando rutas...'
+                        : `Calculando ruta (Día ${selectedDayNumber || ''})...`}
+                    </span>
+                  </div>
+                )}
+
+                {!routeStatus.isLoading && routeMode === 'transit' && transitSummary && (
+                  <div className="px-2.5 py-1 bg-[#17243A]/95 text-white text-[11px] font-medium rounded-full shadow-xs flex items-center gap-2 border border-slate-700 tabular-nums whitespace-nowrap">
+                    <span className="font-semibold text-amber-300">
+                      {transitSummary.legCount} {transitSummary.legCount === 1 ? 'tramo' : 'tramos'}
+                    </span>
+                    <span aria-hidden="true" className="w-px h-3 bg-white/20" />
+                    <span className="font-semibold text-emerald-400">
+                      ~S/ {transitSummary.totalFarePen.toFixed(2)}
+                    </span>
+                    <span aria-hidden="true" className="w-px h-3 bg-white/20" />
+                    <span>~{transitSummary.totalMinutes} min</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowRoutes(!showRoutes)}
+                      className="text-[11px] px-2 py-0.5 rounded-full bg-white/15 hover:bg-white/25 text-white font-semibold transition-colors cursor-pointer ml-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                      title={showRoutes ? 'Ocultar trazo en mapa' : 'Mostrar trazo en mapa'}
+                    >
+                      {showRoutes ? 'Ocultar' : 'Ver'}
+                    </button>
+                  </div>
+                )}
+
+                {!routeStatus.isLoading && routeMode === 'driving' && routeStatus.data && selectedDayNumber && (
+                  <div className="px-2.5 py-1 bg-[#17243A]/95 text-white text-[11px] font-medium rounded-full shadow-xs flex items-center gap-2 border border-slate-700 tabular-nums whitespace-nowrap">
+                    <span className="font-semibold text-emerald-400">
+                      {routeStatus.data.distanceFormatted}
+                    </span>
+                    <span aria-hidden="true" className="w-px h-3 bg-white/20" />
+                    <span>~{routeStatus.data.durationFormatted}</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowRoutes(!showRoutes)}
+                      className="text-[11px] px-2 py-0.5 rounded-full bg-white/15 hover:bg-white/25 text-white font-semibold transition-colors cursor-pointer ml-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                      title={showRoutes ? 'Ocultar trazo en mapa' : 'Mostrar trazo en mapa'}
+                    >
+                      {showRoutes ? 'Ocultar' : 'Ver'}
+                    </button>
+                  </div>
+                )}
+
+                {!routeStatus.isLoading && routeMode === 'driving' && routeStatus.isUnavailable && selectedDayNumber && (
+                  <div className="px-3 py-1.5 bg-amber-950/90 backdrop-blur-xs text-amber-100 text-[11px] font-medium rounded-full shadow-xs flex items-center gap-1.5 border border-amber-600/40 whitespace-nowrap">
+                    <AlertCircle className="w-3 h-3 text-amber-400 shrink-0" />
+                    <span>Recorrido vial no disponible</span>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             /* ================= MODO EXPLORAR (CATÁLOGO COMPLETO) ================= */
@@ -1607,8 +2141,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           )}
         </div>
 
-        {/* Botón Flotante "Buscar en esta zona" (Aparece cuando el usuario desplaza el mapa) */}
-        {showSearchAreaBtn && !isAreaFilterActive && (
+        {/* Botón Flotante "Buscar en esta zona" (Solo en Modo Explorar) */}
+        {!isItineraryMode && showSearchAreaBtn && !isAreaFilterActive && (
           <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-in fade-in zoom-in-95 duration-150">
             <button
               type="button"
@@ -1627,56 +2161,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <div className="px-3 py-1.5 bg-[#17243A] text-white text-xs font-medium rounded-full shadow-md flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-[#E85B49]" />
               <span>{userLocationMessage}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Indicador de recorrido del día (OSRM) */}
-        {!userLocationMessage && routeStatus.isLoading && (
-          <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-in fade-in duration-150">
-            <div className="px-3.5 py-1.5 bg-[#17243A]/90 backdrop-blur-xs text-white text-xs font-medium rounded-full shadow-lg flex items-center gap-2 border border-slate-700">
-              <RefreshCw className="w-3.5 h-3.5 text-[#E85B49] animate-spin" />
-              <span>Calculando recorrido vial (Día {selectedDayNumber || ''})...</span>
-            </div>
-          </div>
-        )}
-
-        {!userLocationMessage && !routeStatus.isLoading && routeStatus.data && selectedDayNumber && (
-          <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-in fade-in duration-150 max-w-[92%] sm:max-w-md">
-            <div className="px-3.5 py-1.5 bg-[#17243A] text-white text-xs font-medium rounded-full shadow-lg flex items-center gap-2 border border-slate-700">
-              <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ backgroundColor: getDayColor(selectedDayNumber).bg }}
-              />
-              <span className="font-bold shrink-0">Día {selectedDayNumber}:</span>
-              <span className="font-semibold text-emerald-400 shrink-0">
-                {routeStatus.data.distanceFormatted}
-              </span>
-              <span className="text-slate-400">·</span>
-              <span className="shrink-0">~{routeStatus.data.durationFormatted} en ruta</span>
-              <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-slate-300 font-mono hidden sm:inline">
-                OSRM
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowRoutes(!showRoutes)}
-                className="ml-1 text-[11px] text-slate-300 hover:text-white underline cursor-pointer shrink-0"
-                title={showRoutes ? 'Ocultar trazo en mapa' : 'Mostrar trazo en mapa'}
-              >
-                {showRoutes ? 'Ocultar' : 'Ver'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {!userLocationMessage && !routeStatus.isLoading && routeStatus.isUnavailable && selectedDayNumber && (
-          <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-in fade-in duration-150 max-w-[92%] sm:max-w-md">
-            <div className="px-3.5 py-1.5 bg-amber-950/90 backdrop-blur-xs text-amber-100 text-xs font-medium rounded-full shadow-lg flex items-center gap-2 border border-amber-600/40">
-              <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="truncate">Recorrido vial aún no disponible para este tramo</span>
-              <span className="text-[10px] text-amber-300 bg-amber-900/60 px-1.5 py-0.5 rounded shrink-0">
-                Orden #1..#{routeStatus.totalPoints}
-              </span>
             </div>
           </div>
         )}

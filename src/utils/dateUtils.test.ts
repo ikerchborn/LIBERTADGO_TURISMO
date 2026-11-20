@@ -5,7 +5,10 @@ import {
   calculateTripDuration,
   calculateOptionalTripDates,
   formatDateRange,
+  formatSingleDateShort,
   generateDayList,
+  getCalendarGridDays,
+  getSpanishMonthYear,
 } from './dateUtils.ts';
 
 test('calculateTripDuration computes days and nights for a standard 5-day trip', () => {
@@ -89,4 +92,29 @@ test('generateDayList generates correct day items with and without startDate', (
   assert.equal(flexibleDays[0].label, 'Día 1');
   assert.equal(flexibleDays[0].dateString, '');
   assert.equal(flexibleDays[0].formattedDate, 'Fecha flexible');
+});
+
+test('formatSingleDateShort formats a single date in Spanish', () => {
+  assert.equal(formatSingleDateShort('2026-11-27'), '27 nov. 2026');
+  assert.equal(formatSingleDateShort('2026-12-01'), '1 dic. 2026');
+});
+
+test('getSpanishMonthYear formats capitalized month and year', () => {
+  assert.equal(getSpanishMonthYear(2026, 10), 'Noviembre 2026');
+  assert.equal(getSpanishMonthYear(2026, 11), 'Diciembre 2026');
+});
+
+test('getCalendarGridDays builds Monday-first grid for November 2026', () => {
+  const cells = getCalendarGridDays(2026, 10); // Nov 2026: Nov 1 is Sunday
+  assert.equal(cells.length % 7, 0);
+  // First row: Oct 26 (Mon) .. Oct 31 (Sat), Nov 1 (Sun)
+  assert.equal(cells[0].dateString, '2026-10-26');
+  assert.equal(cells[0].isCurrentMonth, false);
+  assert.equal(cells[6].dateString, '2026-11-01');
+  assert.equal(cells[6].isCurrentMonth, true);
+  // Nov 30 is Monday -> followed by Dec 1..6
+  const nov30Index = cells.findIndex((c) => c.dateString === '2026-11-30');
+  assert.equal(nov30Index % 7, 0);
+  assert.equal(cells[cells.length - 1].dateString, '2026-12-06');
+  assert.equal(cells[cells.length - 1].isCurrentMonth, false);
 });
