@@ -105,7 +105,7 @@ export const LA_LIBERTAD_LOCALITIES: Locality[] = [
     isPriority: false,
     description: 'Acceso a la Huaca Arco Iris (Huaca del Dragón) con frisos ceremoniales de adobe y proximidad al complejo Chan Chan.',
     highlights: ['Huaca Arco Iris', 'Plaza Cívica de La Esperanza', 'Artesanía en barro'],
-    heroImage: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
+    heroImage: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRWCTXwajrnZNSqNs68bPcdJL2BrRaFxQ2idwHh2e21PM8QCOQanx9YzY8&s=10s',
   },
   {
     id: 'magdalena-cao',
