@@ -19,6 +19,17 @@ import { isWithinLaLibertad } from '../../utils/geoBoundary.ts';
 import { LA_LIBERTAD_LOCALITIES } from '../../types/geo.ts';
 import crypto from 'crypto';
 
+export interface PublicPlaceFilters {
+  localityId?: string;
+  category?: string;
+  search?: string;
+}
+
+export interface PublicPlacePage {
+  places: Place[];
+  total: number;
+}
+
 export interface IPlaceRepository {
   listPlaces(filters?: PlaceAdminFilters): Promise<{ places: AdminPlaceRecord[]; total: number; page: number; totalPages: number }>;
   getPlaceById(id: string): Promise<AdminPlaceRecord | null>;
@@ -34,7 +45,8 @@ export interface IPlaceRepository {
   getLocalitiesStats(): Promise<{ localityId: string; localityName: string; count: number; published: number }[]>;
   getSourcesStats(): Promise<{ sourceId: string; count: number }[]>;
   getDashboardMetrics(): Promise<AdminDashboardMetrics>;
-  getPublicPlaces(filters?: { localityId?: string; category?: string; search?: string }): Promise<Place[]>;
+  getPublicPlaces(filters?: PublicPlaceFilters): Promise<Place[]>;
+  getPublicPlacesPage(filters: PublicPlaceFilters | undefined, page: number, limit: number): Promise<PublicPlacePage>;
   testConnection?(): Promise<void>;
 }
 
@@ -708,7 +720,7 @@ export class PlaceRepository implements IPlaceRepository {
     };
   }
 
-  public async getPublicPlaces(filters?: { localityId?: string; category?: string; search?: string }): Promise<Place[]> {
+  public async getPublicPlaces(filters?: PublicPlaceFilters): Promise<Place[]> {
     // For public users, only show PUBLISHED places
     let result = Array.from(this.places.values()).filter((p) => p.status === 'PUBLISHED');
 
@@ -738,6 +750,24 @@ export class PlaceRepository implements IPlaceRepository {
     }
 
     return result.filter((p) => isWithinLaLibertad(p.coordinates));
+  }
+
+  public async getPublicPlacesPage(
+    filters: PublicPlaceFilters | undefined,
+    page: number,
+    limit: number
+  ): Promise<PublicPlacePage> {
+    const places = (await this.getPublicPlaces(filters)).sort((left, right) => {
+      if (left.name !== right.name) return left.name < right.name ? -1 : 1;
+      if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+      return 0;
+    });
+    const startIndex = (page - 1) * limit;
+
+    return {
+      places: places.slice(startIndex, startIndex + limit),
+      total: places.length,
+    };
   }
 }
 

@@ -6,6 +6,7 @@
  */
 
 import crypto from 'crypto';
+import { promisify } from 'util';
 import { Request, Response, NextFunction } from 'express';
 import { UserRole } from '../types/creators.ts';
 import { getAuthRepository } from './repositories/index.ts';
@@ -73,9 +74,23 @@ declare global {
 
 // --- PASSWORD UTILITIES ---
 
+const scryptAsync = promisify(crypto.scrypt) as (
+  password: string | Buffer,
+  salt: string | Buffer,
+  keylen: number
+) => Promise<Buffer>;
+
+const DUMMY_SALT = '00000000000000000000000000000000';
+
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
   const derivedKey = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derivedKey}`;
+}
+
+export async function hashPasswordAsync(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derivedKey = (await scryptAsync(password, salt, 64)).toString('hex');
   return `${salt}:${derivedKey}`;
 }
 
@@ -85,9 +100,29 @@ export function verifyPassword(password: string, storedHash: string): boolean {
     if (!salt || !key) return false;
     const keyBuffer = Buffer.from(key, 'hex');
     const derivedBuffer = crypto.scryptSync(password, salt, 64);
-    return crypto.timingSafeEqual(keyBuffer, derivedBuffer);
+    return keyBuffer.length === derivedBuffer.length && crypto.timingSafeEqual(keyBuffer, derivedBuffer);
   } catch {
     return false;
+  }
+}
+
+export async function verifyPasswordAsync(password: string, storedHash: string): Promise<boolean> {
+  try {
+    const [salt, key] = storedHash.split(':');
+    if (!salt || !key) return false;
+    const keyBuffer = Buffer.from(key, 'hex');
+    const derivedBuffer = await scryptAsync(password, salt, 64);
+    return keyBuffer.length === derivedBuffer.length && crypto.timingSafeEqual(keyBuffer, derivedBuffer);
+  } catch {
+    return false;
+  }
+}
+
+export async function dummyPasswordCheckAsync(password: string): Promise<void> {
+  try {
+    await scryptAsync(password, DUMMY_SALT, 64);
+  } catch {
+    // Ignore errors during dummy timing equalization
   }
 }
 
@@ -144,6 +179,9 @@ export function verifyToken(token: string): TokenPayload | null {
 // --- TOKEN REVOCATION & BLACKLIST ---
 
 const revokedTokenHashes = new Set<string>();
+const NON_REVOKED_CACHE_TTL_MS = 60 * 1000;
+const NON_REVOKED_CACHE_MAX_SIZE = 5000;
+const nonRevokedTokenCache = new Map<string, number>();
 
 export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token.trim()).digest('hex');
@@ -151,6 +189,7 @@ export function hashToken(token: string): string {
 
 export async function revokeToken(token: string, userId?: string): Promise<void> {
   const tokenHash = hashToken(token);
+  nonRevokedTokenCache.delete(tokenHash);
   revokedTokenHashes.add(tokenHash);
 
   try {
@@ -180,6 +219,11 @@ export async function isTokenRevoked(token: string): Promise<boolean> {
     return true;
   }
 
+  const cachedUntil = nonRevokedTokenCache.get(tokenHash);
+  if (cachedUntil && Date.now() < cachedUntil) {
+    return false;
+  }
+
   try {
     if (process.env.DATABASE_URL) {
       const { getDbPool } = await import('./repositories/dbPool.ts');
@@ -189,9 +233,16 @@ export async function isTokenRevoked(token: string): Promise<boolean> {
         [tokenHash]
       );
       if (res.rows.length > 0) {
+        nonRevokedTokenCache.delete(tokenHash);
         revokedTokenHashes.add(tokenHash);
         return true;
       }
+
+      if (nonRevokedTokenCache.size >= NON_REVOKED_CACHE_MAX_SIZE) {
+        const oldestKey = nonRevokedTokenCache.keys().next().value;
+        if (oldestKey) nonRevokedTokenCache.delete(oldestKey);
+      }
+      nonRevokedTokenCache.set(tokenHash, Date.now() + NON_REVOKED_CACHE_TTL_MS);
     }
   } catch {
     // Rely on memory cache if DB is not reachable
@@ -207,6 +258,7 @@ export function isTokenRevokedSync(token: string): boolean {
 
 export function clearRevokedTokensForTesting(): void {
   revokedTokenHashes.clear();
+  nonRevokedTokenCache.clear();
 }
 
 // --- MIDDLEWARES ---
@@ -313,7 +365,7 @@ export async function bootstrapAdminFromEnv(): Promise<{ bootstrapped: boolean; 
       console.log(`[Security] Bootstrapping initial admin account for: ${email}`);
       await authRepo.createUser({
         email,
-        passwordHash: hashPassword(password),
+        passwordHash: await hashPasswordAsync(password),
         name,
         role: 'ADMIN',
       });
@@ -370,10 +422,12 @@ export function csrfProtectionMiddleware(req: Request, res: Response, next: Next
   if (origin) {
     try {
       const originUrl = new URL(origin);
-      const expectedHost = req.headers['x-forwarded-host'] || req.headers.host;
+      const expectedHost = req.headers.host;
+      const isDev = process.env.NODE_ENV !== 'production';
+      const isLocalOrigin = isDev && (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1');
       if (expectedHost) {
         const expectedHostName = (Array.isArray(expectedHost) ? expectedHost[0] : expectedHost).split(':')[0];
-        if (originUrl.hostname !== expectedHostName && originUrl.hostname !== 'localhost' && originUrl.hostname !== '127.0.0.1') {
+        if (originUrl.hostname !== expectedHostName && !isLocalOrigin) {
           res.status(403).json({
             success: false,
             error: 'Solicitud bloqueada por protección CSRF: encabezado Origin no coincide con el host.',

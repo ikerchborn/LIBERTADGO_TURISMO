@@ -2,6 +2,7 @@ process.env.DISABLE_HMR = 'true';
 import 'dotenv/config';
 import fs from 'fs';
 import express from 'express';
+import helmet from 'helmet';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,6 +20,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let isShuttingDown = false;
+
+function getAllowedImageSources(): string[] {
+  const sources = [
+    "'self'",
+    'data:',
+    'blob:',
+    'https://images.unsplash.com',
+    'https://img.youtube.com',
+    'https://i.ytimg.com',
+    'https://*.tiktokcdn.com',
+    'https://*.cdninstagram.com',
+    'https://*.fbcdn.net',
+  ];
+  const publicUrl = process.env.R2_PUBLIC_URL?.trim();
+
+  if (publicUrl) {
+    const parsedUrl = new URL(publicUrl);
+    if (parsedUrl.protocol !== 'https:' || parsedUrl.username || parsedUrl.password) {
+      throw new Error('R2_PUBLIC_URL debe ser una URL HTTPS válida sin credenciales.');
+    }
+    sources.push(parsedUrl.origin);
+  }
+
+  return sources;
+}
 
 function registerGracefulShutdown(server: Server): void {
   const shutdown = async (signal: string) => {
@@ -70,6 +96,36 @@ function registerGracefulShutdown(server: Server): void {
 
 async function startServer() {
   const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1); // Cloud Run: 1 proxy hop
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        imgSrc: getAllowedImageSources(),
+        fontSrc: ["'self'", 'data:'],
+        connectSrc: [
+          "'self'",
+          'https://router.project-osrm.org',
+          'https://tiles.openfreemap.org',
+        ],
+        frameSrc: [
+          "'self'",
+          'https://www.tiktok.com',
+          'https://www.instagram.com',
+          'https://www.youtube-nocookie.com',
+        ],
+        workerSrc: ["'self'", 'blob:'], // maplibre-gl
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true },
+  }));
+  app.use((_req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
+    next();
+  });
 
   // AI Studio and development dev-server port handling
   let cliPort: number | null = null;
@@ -163,7 +219,15 @@ async function startServer() {
 
   if (isProduction) {
     // Frontend compilado por Vite
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (path.basename(filePath) === 'index.html') {
+          res.setHeader('Cache-Control', 'no-cache');
+        } else if (filePath.split(path.sep).includes('assets')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }));
 
     // Fallback exclusivo para rutas web de la SPA React
     app.get('*', (req, res) => {

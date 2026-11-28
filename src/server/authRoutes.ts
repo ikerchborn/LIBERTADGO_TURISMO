@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { RegisterUserSchema, LoginUserSchema } from './creatorsSchemas.ts';
 import { getAuthRepository, getCreatorsRepository } from './repositories/index.ts';
-import { hashPassword, verifyPassword, createToken, requireAuth, revokeToken } from './authService.ts';
+import { hashPasswordAsync, verifyPasswordAsync, dummyPasswordCheckAsync, createToken, requireAuth, revokeToken } from './authService.ts';
 import { authRateLimiter } from './rateLimiter.ts';
 
 export const authRouter = Router();
@@ -46,7 +46,7 @@ authRouter.post('/register', authRateLimiter, async (req: Request, res: Response
     // Public registration always assigns USER role. Admin is only created via bootstrapAdminFromEnv.
     const newUser = await authRepo.createUser({
       email,
-      passwordHash: hashPassword(password),
+      passwordHash: await hashPasswordAsync(password),
       name,
       role: 'USER',
     });
@@ -97,6 +97,7 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
   try {
     const user = await authRepo.findUserByEmail(email);
     if (!user) {
+      await dummyPasswordCheckAsync(password);
       res.status(401).json({
         success: false,
         error: 'Credenciales inválidas. Verifica tu correo o contraseña.',
@@ -104,7 +105,7 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       return;
     }
 
-    const isValid = verifyPassword(password, user.passwordHash);
+    const isValid = await verifyPasswordAsync(password, user.passwordHash);
     if (!isValid) {
       res.status(401).json({
         success: false,

@@ -5,7 +5,7 @@
  */
 
 import { Pool, PoolClient } from 'pg';
-import { IPlaceRepository } from './placeRepository.ts';
+import { IPlaceRepository, PublicPlaceFilters, PublicPlacePage } from './placeRepository.ts';
 import { Place, PlaceCategory, PlaceVerification, PlaceSource, PlaceImage, PlaceOpeningHours } from '../../types/catalog.ts';
 import {
   AdminPlaceRecord,
@@ -17,7 +17,7 @@ import {
 } from '../../types/adminCatalog.ts';
 import { INITIAL_PLACES } from '../../data/initialPlaces.ts';
 import { isWithinLaLibertad } from '../../utils/geoBoundary.ts';
-import { LA_LIBERTAD_LOCALITIES } from '../../types/geo.ts';
+import { LA_LIBERTAD_BOUNDS, LA_LIBERTAD_LOCALITIES } from '../../types/geo.ts';
 import crypto from 'crypto';
 
 // Distance calculation using Haversine formula (meters)
@@ -1196,23 +1196,49 @@ export class PostgresPlaceRepository implements IPlaceRepository {
     };
   }
 
-  async getPublicPlaces(filters?: { localityId?: string; category?: string; search?: string }): Promise<Place[]> {
+  async getPublicPlaces(filters?: PublicPlaceFilters): Promise<Place[]> {
     return this.getPublicPlacesAsync(filters);
   }
 
-  async getPublicPlacesAsync(filters?: { localityId?: string; category?: string; search?: string }): Promise<Place[]> {
-    const conditions = ["status = 'PUBLISHED'"];
-    const values: any[] = [];
+  async getPublicPlacesAsync(filters?: PublicPlaceFilters): Promise<Place[]> {
+    const result = await this.queryPublicPlaces(filters);
+    return result.places;
+  }
+
+  async getPublicPlacesPage(
+    filters: PublicPlaceFilters | undefined,
+    page: number,
+    limit: number
+  ): Promise<PublicPlacePage> {
+    return this.queryPublicPlaces(filters, { page, limit });
+  }
+
+  private async queryPublicPlaces(
+    filters?: PublicPlaceFilters,
+    pagination?: { page: number; limit: number }
+  ): Promise<PublicPlacePage> {
+    const conditions = ["p.status = 'PUBLISHED'"];
+    const values: (string | number)[] = [];
     let idx = 1;
 
+    conditions.push(`p.latitude BETWEEN $${idx} AND $${idx + 1}`);
+    values.push(LA_LIBERTAD_BOUNDS.minLat, LA_LIBERTAD_BOUNDS.maxLat);
+    idx += 2;
+    conditions.push(`p.longitude BETWEEN $${idx} AND $${idx + 1}`);
+    values.push(LA_LIBERTAD_BOUNDS.minLng, LA_LIBERTAD_BOUNDS.maxLng);
+    idx += 2;
+
     if (filters?.localityId && filters.localityId !== 'todas') {
-      conditions.push(`LOWER(locality_id) = $${idx}`);
+      conditions.push(`LOWER(p.locality_id) = $${idx}`);
       values.push(filters.localityId.toLowerCase().trim());
       idx++;
     }
 
     if (filters?.category && filters.category !== 'todas') {
-      conditions.push(`LOWER(category) = $${idx}`);
+      conditions.push(`(
+        LOWER(p.category) = $${idx} OR
+        LOWER(COALESCE(p.subcategory, '')) LIKE '%' || $${idx} || '%'
+      )`);
       values.push(filters.category.toLowerCase().trim());
       idx++;
     }
@@ -1220,30 +1246,73 @@ export class PostgresPlaceRepository implements IPlaceRepository {
     if (filters?.search) {
       const q = `%${filters.search.toLowerCase().trim()}%`;
       conditions.push(`(
-        LOWER(name) LIKE $${idx} OR
-        LOWER(address) LIKE $${idx} OR
-        LOWER(short_description) LIKE $${idx}
+        LOWER(p.name) LIKE $${idx} OR
+        LOWER(p.address) LIKE $${idx} OR
+        LOWER(p.short_description) LIKE $${idx} OR
+        EXISTS (
+          SELECT 1
+          FROM unnest(COALESCE(p.tags, ARRAY[]::TEXT[])) AS place_tag(tag)
+          WHERE LOWER(place_tag.tag) LIKE $${idx}
+        )
       )`);
       values.push(q);
       idx++;
     }
 
+    const queryValues: (string | number)[] = [...values];
+    const paginationSql = pagination
+      ? `LIMIT $${idx} OFFSET $${idx + 1}`
+      : '';
+    const totalCountSql = pagination
+      ? 'COUNT(*) OVER() AS total_count,'
+      : '';
+    if (pagination) {
+      queryValues.push(pagination.limit, (pagination.page - 1) * pagination.limit);
+    }
+
     const query = `
       SELECT p.*,
-        COALESCE(json_agg(DISTINCT img.*) FILTER (WHERE img.id IS NOT NULL), '[]') as images_json,
-        COALESCE(json_agg(DISTINCT src.*) FILTER (WHERE src.id IS NOT NULL), '[]') as sources_json,
-        COALESCE(json_agg(DISTINCT hrs.*) FILTER (WHERE hrs.id IS NOT NULL), '[]') as hours_json
+        ${totalCountSql}
+        COALESCE(img.images_json, '[]') as images_json,
+        COALESCE(src.sources_json, '[]') as sources_json,
+        COALESCE(hrs.hours_json, '[]') as hours_json
       FROM places p
-      LEFT JOIN place_images img ON img.place_id = p.id
-      LEFT JOIN place_sources src ON src.place_id = p.id
-      LEFT JOIN place_opening_hours hrs ON hrs.place_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT json_agg(to_jsonb(img) ORDER BY img.id) as images_json
+        FROM place_images img
+        WHERE img.place_id = p.id
+      ) img ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT json_agg(to_jsonb(src) ORDER BY src.source_id) as sources_json
+        FROM place_sources src
+        WHERE src.place_id = p.id
+      ) src ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT json_agg(to_jsonb(hrs) ORDER BY hrs.day_of_week) as hours_json
+        FROM place_opening_hours hrs
+        WHERE hrs.place_id = p.id
+      ) hrs ON TRUE
       WHERE ${conditions.join(' AND ')}
-      GROUP BY p.id
-      ORDER BY p.name ASC
+      ORDER BY p.name COLLATE "C" ASC, p.id COLLATE "C" ASC
+      ${paginationSql}
     `;
 
-    const res = await this.pool.query(query, values);
-    return res.rows
+    const res = await this.pool.query(query, queryValues);
+    let total = res.rows.length;
+
+    if (pagination) {
+      if (res.rows.length > 0) {
+        total = Number(res.rows[0].total_count);
+      } else {
+        const countRes = await this.pool.query(
+          `SELECT COUNT(*) AS total FROM places p WHERE ${conditions.join(' AND ')}`,
+          values
+        );
+        total = Number(countRes.rows[0].total);
+      }
+    }
+
+    const places = res.rows
       .map((row) => {
         const images: PlaceImage[] = (row.images_json || []).map((img: any) => ({
           id: img.id,
@@ -1272,5 +1341,7 @@ export class PostgresPlaceRepository implements IPlaceRepository {
         return this.mapRowToPlace(row, images, sources, hours);
       })
       .filter((p) => isWithinLaLibertad(p.coordinates));
+
+    return { places, total };
   }
 }

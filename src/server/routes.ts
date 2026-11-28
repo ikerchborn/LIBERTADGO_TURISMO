@@ -1,15 +1,56 @@
 import { Router, Request, Response } from 'express';
 import { catalogRepository } from './repository.ts';
 import { INITIAL_EVENTS } from '../data/initialEvents.ts';
-import { CreateTripSchema } from './schemas.ts';
+import { CreateTripSchema, AddActivitySchema, CreateCampaignSchema, CreateSubmissionSchema, AiChatSchema } from './schemas.ts';
 import { authRouter } from './authRoutes.ts';
 import { creatorsRouter } from './creatorsRoutes.ts';
 import { adminRouter } from './adminRoutes.ts';
-import { authMiddleware } from './authService.ts';
+import { authMiddleware, requireAuth } from './authService.ts';
+import {
+  aiRateLimiter,
+  aiCreditTracker,
+  AI_FREE_CREDITS_CAP,
+  campaignRateLimiter,
+  submissionRateLimiter,
+  voteRateLimiter,
+  itineraryRateLimiter,
+} from './rateLimiter.ts';
 
 import { checkDatabaseHealth } from './repositories/index.ts';
 
 export const apiRouter = Router();
+
+const DEFAULT_PUBLIC_PAGE_SIZE = 50;
+const MAX_PUBLIC_PAGE_SIZE = 100;
+
+function parsePositiveInteger(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function parsePagination(
+  pageValue: unknown,
+  limitValue: unknown
+): { page: number; limit: number } | null {
+  const page = pageValue === undefined ? 1 : parsePositiveInteger(pageValue);
+  const limit = limitValue === undefined
+    ? DEFAULT_PUBLIC_PAGE_SIZE
+    : parsePositiveInteger(limitValue);
+
+  if (page === null || limit === null || limit > MAX_PUBLIC_PAGE_SIZE) {
+    return null;
+  }
+
+  if (!Number.isSafeInteger((page - 1) * limit)) {
+    return null;
+  }
+
+  return { page, limit };
+}
 
 // GET /api/health - Public health check returning application/json status
 apiRouter.get('/health', async (_req: Request, res: Response) => {
@@ -64,26 +105,30 @@ apiRouter.get('/events', (_req: Request, res: Response) => {
 
 // GET /api/places
 apiRouter.get('/places', async (req: Request, res: Response) => {
+  const pagination = parsePagination(req.query.page, req.query.limit);
+  if (!pagination) {
+    res.status(400).json({
+      success: false,
+      error: 'page debe ser un entero positivo y limit un entero entre 1 y 100',
+    });
+    return;
+  }
+
   try {
-    const { localityId, category, q, page, limit } = req.query;
-    const places = await catalogRepository.getPlaces({
+    const { localityId, category, q } = req.query;
+    const result = await catalogRepository.getPlacesPage({
       localityId: typeof localityId === 'string' ? localityId : undefined,
       category: typeof category === 'string' ? category : undefined,
       search: typeof q === 'string' ? q : undefined,
-    });
-
-    const pageNum = Math.max(1, Number(page) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
-    const total = places.length;
-    const startIndex = (pageNum - 1) * pageSize;
-    const paginated = limit ? places.slice(startIndex, startIndex + pageSize) : places;
+    }, pagination.page, pagination.limit);
 
     res.json({
       success: true,
-      data: paginated,
-      total,
-      page: pageNum,
-      totalPages: Math.ceil(total / pageSize),
+      data: result.places,
+      total: result.total,
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(result.total / pagination.limit),
       regionConstraint: 'La Libertad',
       sources: ['MINCETUR', 'OpenStreetMap', 'Directorio_Oficial_La_Libertad'],
     });
@@ -95,15 +140,37 @@ apiRouter.get('/places', async (req: Request, res: Response) => {
 
 // GET /api/places/search
 apiRouter.get('/places/search', async (req: Request, res: Response) => {
-  try {
-    const q = typeof req.query.q === 'string' ? req.query.q : '';
-    const localityId = typeof req.query.localityId === 'string' ? req.query.localityId : undefined;
+  const pagination = parsePagination(req.query.page, req.query.limit);
+  if (!pagination) {
+    res.status(400).json({
+      success: false,
+      error: 'page debe ser un entero positivo y limit un entero entre 1 y 100',
+    });
+    return;
+  }
 
-    const places = await catalogRepository.searchPlaces(q, localityId);
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q || q.length > 120) {
+    res.status(400).json({
+      success: false,
+      error: 'La búsqueda debe tener entre 1 y 120 caracteres',
+    });
+    return;
+  }
+
+  try {
+    const localityId = typeof req.query.localityId === 'string' ? req.query.localityId : undefined;
+    const result = await catalogRepository.getPlacesPage({
+      search: q,
+      localityId,
+    }, pagination.page, pagination.limit);
     res.json({
       success: true,
-      data: places,
-      total: places.length,
+      data: result.places,
+      total: result.total,
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(result.total / pagination.limit),
     });
   } catch (err) {
     console.error('[Places Error] Error searching places:', err);
@@ -150,27 +217,31 @@ apiRouter.get('/places/:id', async (req: Request, res: Response) => {
 });
 
 // GET /api/route - Real-world street routing via OpenStreetMap / OSRM
+const COORDS_RE = /^-?\d{1,3}(\.\d+)?,-?\d{1,2}(\.\d+)?(;-?\d{1,3}(\.\d+)?,-?\d{1,2}(\.\d+)?){1,24}$/;
+
 apiRouter.get('/route', async (req: Request, res: Response) => {
   const coordinates = typeof req.query.coordinates === 'string' ? req.query.coordinates.trim() : '';
-  if (!coordinates || !coordinates.includes(';')) {
+  if (!COORDS_RE.test(coordinates)) {
     res.status(400).json({
       success: false,
-      error: 'Se requieren al menos 2 coordenadas separadas por punto y coma (ej. lng1,lat1;lng2,lat2)',
+      error: 'Coordenadas inválidas. Debe ser lng1,lat1;lng2,lat2 numérico (2 a 25 puntos).',
     });
     return;
   }
 
-  // Validate format
   const pairs = coordinates.split(';');
-  const isValidFormat = pairs.every((p) => {
-    const [lng, lat] = p.split(',').map(Number);
-    return !isNaN(lng) && !isNaN(lat) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  const isValidRange = pairs.every((p) => {
+    const parts = p.split(',');
+    if (parts.length !== 2) return false;
+    const lng = Number(parts[0]);
+    const lat = Number(parts[1]);
+    return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
   });
 
-  if (!isValidFormat) {
+  if (!isValidRange) {
     res.status(400).json({
       success: false,
-      error: 'Formato de coordenadas inválido. Debe ser longitud,latitud numérico.',
+      error: 'Coordenadas fuera de rango geográfico válido.',
     });
     return;
   }
@@ -178,7 +249,8 @@ apiRouter.get('/route', async (req: Request, res: Response) => {
   try {
     const rawProfile = typeof req.query.profile === 'string' ? req.query.profile.trim().toLowerCase() : 'driving';
     const osrmProfile = rawProfile === 'walking' || rawProfile === 'foot' ? 'foot' : 'driving';
-    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${coordinates}?overview=full&geometries=geojson`;
+    const safeCoords = encodeURIComponent(coordinates).replace(/%2C/g, ',').replace(/%3B/g, ';');
+    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${safeCoords}?overview=full&geometries=geojson`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
 
@@ -244,7 +316,7 @@ apiRouter.get('/route', async (req: Request, res: Response) => {
 });
 
 // POST /api/itineraries
-apiRouter.post('/itineraries', (req: Request, res: Response) => {
+apiRouter.post('/itineraries', itineraryRateLimiter, (req: Request, res: Response) => {
   const parseResult = CreateTripSchema.safeParse(req.body);
   if (!parseResult.success) {
     const errorMsg = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
@@ -280,11 +352,13 @@ apiRouter.get('/itineraries/:id', (req: Request, res: Response) => {
 
 // POST /api/itineraries/:id/activities
 apiRouter.post('/itineraries/:id/activities', async (req: Request, res: Response) => {
-  const { placeId, dayNumber, timeSlot, notes } = req.body;
-  if (!placeId || typeof dayNumber !== 'number') {
-    res.status(400).json({ success: false, error: 'placeId y dayNumber son obligatorios' });
+  const parseResult = AddActivitySchema.safeParse(req.body);
+  if (!parseResult.success) {
+    const errorMsg = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+    res.status(400).json({ success: false, error: errorMsg });
     return;
   }
+  const { placeId, dayNumber, timeSlot, notes } = parseResult.data;
 
   const result = await catalogRepository.addActivity(req.params.id, {
     placeId,
@@ -345,13 +419,15 @@ apiRouter.get('/campaigns/:id', (req: Request, res: Response) => {
 });
 
 // POST /api/campaigns
-apiRouter.post('/campaigns', (req: Request, res: Response) => {
-  const { title, businessName, placeId, localityId, startDate, endDate, description, videoBrief, requirements, hashtags, prizes } = req.body;
-
-  if (!title || !businessName || !startDate || !endDate) {
-    res.status(400).json({ success: false, error: 'Título, nombre del local y fechas son requeridos' });
+apiRouter.post('/campaigns', requireAuth, campaignRateLimiter, (req: Request, res: Response) => {
+  const parseResult = CreateCampaignSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    const errorMsg = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+    res.status(400).json({ success: false, error: errorMsg });
     return;
   }
+
+  const { title, businessName, placeId, localityId, startDate, endDate, description, videoBrief, requirements, hashtags, prizes } = parseResult.data;
 
   const defaultPrizes = prizes || {
     first: {
@@ -396,13 +472,15 @@ apiRouter.post('/campaigns', (req: Request, res: Response) => {
 });
 
 // POST /api/campaigns/:id/submissions
-apiRouter.post('/campaigns/:id/submissions', (req: Request, res: Response) => {
-  const { creatorName, creatorHandle, platform, videoUrl, title, caption, thumbnailUrl } = req.body;
-
-  if (!creatorName || !videoUrl || !title) {
-    res.status(400).json({ success: false, error: 'Nombre del creador, enlace del video y título son obligatorios' });
+apiRouter.post('/campaigns/:id/submissions', requireAuth, submissionRateLimiter, (req: Request, res: Response) => {
+  const parseResult = CreateSubmissionSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    const errorMsg = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+    res.status(400).json({ success: false, error: errorMsg });
     return;
   }
+
+  const { creatorName, creatorHandle, platform, videoUrl, title, caption, thumbnailUrl } = parseResult.data;
 
   const result = catalogRepository.addSubmission(req.params.id, {
     creatorName,
@@ -423,10 +501,10 @@ apiRouter.post('/campaigns/:id/submissions', (req: Request, res: Response) => {
 });
 
 // POST /api/campaigns/:id/submissions/:subId/vote
-apiRouter.post('/campaigns/:id/submissions/:subId/vote', (req: Request, res: Response) => {
-  const result = catalogRepository.voteSubmission(req.params.id, req.params.subId);
+apiRouter.post('/campaigns/:id/submissions/:subId/vote', requireAuth, voteRateLimiter, (req: Request, res: Response) => {
+  const result = catalogRepository.voteSubmission(req.params.id, req.params.subId, req.user?.userId);
   if (!result.success) {
-    res.status(400).json({ success: false, error: result.error });
+    res.status(result.duplicate ? 409 : 400).json({ success: false, error: result.error });
     return;
   }
   res.json({ success: true, newVotes: result.newVotes });
@@ -437,14 +515,27 @@ apiRouter.post('/campaigns/:id/submissions/:subId/vote', (req: Request, res: Res
 // =========================================================================
 
 // POST /api/ai/chat
-apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
+apiRouter.post('/ai/chat', aiRateLimiter, async (req: Request, res: Response) => {
   try {
-    const { message, context, remainingCredits } = req.body;
-
-    if (!message || typeof message !== 'string') {
-      res.status(400).json({ success: false, error: 'Mensaje requerido' });
+    const parseResult = AiChatSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      const errorMsg = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      res.status(400).json({ success: false, error: errorMsg });
       return;
     }
+
+    const creditCheck = aiCreditTracker.consumeCredit(req);
+    if (!creditCheck.allowed) {
+      res.status(429).json({
+        success: false,
+        error: 'Has alcanzado el límite diario de 10 consultas gratuitas al asistente IA.',
+        creditsRemaining: 0,
+        freeCreditsCap: AI_FREE_CREDITS_CAP,
+      });
+      return;
+    }
+
+    const { message, context } = parseResult.data;
 
     // Dynamic import to avoid cold start issues
     const { generateAiResponse } = await import('./geminiService.ts');
@@ -453,15 +544,13 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
       context,
     });
 
-    const creditsLeft = typeof remainingCredits === 'number' ? Math.max(0, remainingCredits - 1) : 9;
-
     res.json({
       success: true,
       reply: result.reply,
       modelUsed: result.modelUsed,
       source: result.source,
-      creditsRemaining: creditsLeft,
-      freeCreditsCap: 10,
+      creditsRemaining: creditCheck.creditsRemaining,
+      freeCreditsCap: AI_FREE_CREDITS_CAP,
     });
   } catch (error) {
     console.error('[API /api/ai/chat Error]', error);

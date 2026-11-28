@@ -357,30 +357,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     try {
       const map = new maplibregl.Map({
         container: mapContainerRef.current,
-        style: {
-          version: 8,
-          sources: {
-            'osm-tiles': {
-              type: 'raster',
-              tiles: [
-                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              ],
-              tileSize: 256,
-              attribution:
-                '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> | RIYMO',
-            },
-          },
-          layers: [
-            {
-              id: 'osm-tiles-layer',
-              type: 'raster',
-              source: 'osm-tiles',
-              minzoom: 0,
-              maxzoom: 19,
-            },
-          ],
+        style: 'https://tiles.openfreemap.org/styles/liberty',
+        attributionControl: {
+          customAttribution:
+            '<a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
         },
         center: [centerLng, centerLat],
         zoom: initialZoom,

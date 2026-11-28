@@ -106,6 +106,98 @@ export const saveVideoRateLimiter = createRateLimiter({
 });
 
 /**
+ * AI Assistant Rate Limiter: 3 requests per minute per user/IP
+ */
+export const aiRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 3,
+  message: 'Demasiadas consultas al asistente IA. Espera un minuto.',
+  keyGenerator: (req) => req.user?.userId || req.ip || 'anon_ai',
+});
+
+/**
+ * Campaign Creation Limiter: 5 campaigns per hour per user
+ */
+export const campaignRateLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  maxRequests: 5,
+  message: 'Límite de creación de campañas alcanzado. Intenta más tarde.',
+  keyGenerator: (req) => req.user?.userId || req.ip || 'anon_campaign',
+});
+
+/**
+ * Campaign Vote Limiter: 20 votes per minute per user
+ */
+export const voteRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 20,
+  message: 'Demasiados votos en poco tiempo. Espera un momento.',
+  keyGenerator: (req) => req.user?.userId || req.ip || 'anon_voter',
+});
+
+/**
+ * Itinerary Creation Limiter: 20 itineraries per 10 minutes per user/IP
+ */
+export const itineraryRateLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  maxRequests: 20,
+  message: 'Límite de creación de itinerarios alcanzado. Espera unos minutos.',
+  keyGenerator: (req) => req.user?.userId || req.ip || 'anon_itinerary',
+});
+
+/**
+ * Server-side AI Daily Credit Tracker (10 free messages per 24h per user/IP)
+ * Never trusts client-supplied remainingCredits.
+ */
+export const AI_FREE_CREDITS_CAP = 10;
+const AI_CREDITS_WINDOW_MS = 24 * 60 * 60 * 1000;
+const AI_CREDITS_MAX_KEYS = 10000;
+
+class AiCreditTracker {
+  private usage = new Map<string, { used: number; resetAt: number }>();
+
+  constructor() {
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.usage.entries()) {
+        if (now > entry.resetAt) {
+          this.usage.delete(key);
+        }
+      }
+    }, 10 * 60 * 1000);
+    cleanupInterval.unref();
+  }
+
+  public consumeCredit(req: Request): { allowed: boolean; creditsRemaining: number } {
+    const key = req.user?.userId || req.ip || req.socket.remoteAddress || 'anon_ai';
+    const now = Date.now();
+    const record = this.usage.get(key);
+
+    if (!record || now > record.resetAt) {
+      if (this.usage.size >= AI_CREDITS_MAX_KEYS) {
+        const oldest = this.usage.keys().next().value;
+        if (oldest) this.usage.delete(oldest);
+      }
+      this.usage.set(key, { used: 1, resetAt: now + AI_CREDITS_WINDOW_MS });
+      return { allowed: true, creditsRemaining: AI_FREE_CREDITS_CAP - 1 };
+    }
+
+    if (record.used >= AI_FREE_CREDITS_CAP) {
+      return { allowed: false, creditsRemaining: 0 };
+    }
+
+    record.used += 1;
+    return { allowed: true, creditsRemaining: AI_FREE_CREDITS_CAP - record.used };
+  }
+
+  public clearForTesting(): void {
+    this.usage.clear();
+  }
+}
+
+export const aiCreditTracker = new AiCreditTracker();
+
+/**
  * Video View Deduplication Cache
  * Prevents rapid view count inflation: ensures at least 60 seconds between view increments
  * for the same video from the same IP/user.

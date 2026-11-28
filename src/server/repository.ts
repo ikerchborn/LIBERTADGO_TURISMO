@@ -4,12 +4,20 @@ import { Place, TripItinerary, TripActivity, LocalCampaign, CampaignSubmission }
 import { LA_LIBERTAD_LOCALITIES, Locality } from '../types/geo.ts';
 import { isWithinLaLibertad, validateLocalityId, getLocality } from '../utils/geoBoundary.ts';
 import { calculateOptionalTripDates } from '../utils/dateUtils.ts';
-import { getPlaceRepository } from './repositories/placeRepository.ts';
+import {
+  getPlaceRepository,
+  type PublicPlaceFilters,
+  type PublicPlacePage,
+} from './repositories/placeRepository.ts';
+
+const MAX_IN_MEMORY_ITINERARIES = 500;
+const MAX_IN_MEMORY_CAMPAIGNS = 200;
 
 class CatalogRepository {
   private places: Map<string, Place> = new Map();
   private itineraries: Map<string, TripItinerary> = new Map();
   private campaigns: Map<string, LocalCampaign> = new Map();
+  private submissionVotes: Map<string, Set<string>> = new Map();
 
   constructor() {
     // Populate verified places catalog
@@ -37,6 +45,14 @@ class CatalogRepository {
   // --- PLACES & CATALOG ---
   public async getPlaces(filters?: { localityId?: string; category?: string; search?: string }): Promise<Place[]> {
     return await getPlaceRepository().getPublicPlaces(filters);
+  }
+
+  public async getPlacesPage(
+    filters: PublicPlaceFilters | undefined,
+    page: number,
+    limit: number
+  ): Promise<PublicPlacePage> {
+    return getPlaceRepository().getPublicPlacesPage(filters, page, limit);
   }
 
   public async getPlaceById(id: string): Promise<Place | undefined> {
@@ -91,6 +107,13 @@ class CatalogRepository {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    if (this.itineraries.size >= MAX_IN_MEMORY_ITINERARIES) {
+      const oldestKey = this.itineraries.keys().next().value;
+      if (oldestKey) {
+        this.itineraries.delete(oldestKey);
+      }
+    }
 
     this.itineraries.set(id, newItinerary);
     return { itinerary: newItinerary };
@@ -200,6 +223,13 @@ class CatalogRepository {
   }
 
   public createCampaign(data: Omit<LocalCampaign, 'id' | 'createdAt' | 'submissions'>): LocalCampaign {
+    if (this.campaigns.size >= MAX_IN_MEMORY_CAMPAIGNS) {
+      const oldestKey = this.campaigns.keys().next().value;
+      if (oldestKey) {
+        this.campaigns.delete(oldestKey);
+      }
+    }
+
     const id = `camp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newCampaign: LocalCampaign = {
       ...data,
@@ -236,12 +266,29 @@ class CatalogRepository {
     return { submission: newSubmission };
   }
 
-  public voteSubmission(campaignId: string, submissionId: string): { success: boolean; newVotes?: number; error?: string } {
+  public voteSubmission(
+    campaignId: string,
+    submissionId: string,
+    userId?: string
+  ): { success: boolean; duplicate?: boolean; newVotes?: number; error?: string } {
     const campaign = this.campaigns.get(campaignId);
     if (!campaign) return { success: false, error: 'Campaña no encontrada' };
 
     const submission = campaign.submissions.find((s) => s.id === submissionId);
     if (!submission) return { success: false, error: 'Envío de video no encontrado' };
+
+    if (userId) {
+      const voteKey = `${campaignId}:${submissionId}`;
+      let voters = this.submissionVotes.get(voteKey);
+      if (!voters) {
+        voters = new Set<string>();
+        this.submissionVotes.set(voteKey, voters);
+      }
+      if (voters.has(userId)) {
+        return { success: false, duplicate: true, error: 'Ya has votado por este video' };
+      }
+      voters.add(userId);
+    }
 
     submission.votesCount += 1;
     submission.viewsCount += Math.floor(Math.random() * 20) + 5;

@@ -152,7 +152,11 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
     if (!mapInstanceRef.current) {
       const map = new maplibregl.Map({
         container: mapContainerRef.current,
-        style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+        style: 'https://tiles.openfreemap.org/styles/liberty',
+        attributionControl: {
+          customAttribution:
+            '<a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
+        },
         center: [lng, lat],
         zoom: 14,
       });

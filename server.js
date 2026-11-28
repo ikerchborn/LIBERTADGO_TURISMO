@@ -47406,7 +47406,7 @@ var init_geo = __esm({
         isPriority: false,
         description: "Acceso a la Huaca Arco Iris (Huaca del Drag\xF3n) con frisos ceremoniales de adobe y proximidad al complejo Chan Chan.",
         highlights: ["Huaca Arco Iris", "Plaza C\xEDvica de La Esperanza", "Artesan\xEDa en barro"],
-        heroImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80"
+        heroImage: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRWCTXwajrnZNSqNs68bPcdJL2BrRaFxQ2idwHh2e21PM8QCOQanx9YzY8&s=10s"
       },
       {
         id: "magdalena-cao",
@@ -51362,6 +51362,7 @@ var init_geminiService = __esm({
 import "dotenv/config";
 import fs2 from "fs";
 import express2 from "express";
+import helmet from "helmet";
 import { createServer as createViteServer } from "vite";
 import path2 from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -51728,11 +51729,14 @@ function calculateOptionalTripDates(startDateStr, endDateStr) {
 
 // src/server/repository.ts
 init_placeRepository();
+var MAX_IN_MEMORY_ITINERARIES = 500;
+var MAX_IN_MEMORY_CAMPAIGNS = 200;
 var CatalogRepository = class {
   constructor() {
     this.places = /* @__PURE__ */ new Map();
     this.itineraries = /* @__PURE__ */ new Map();
     this.campaigns = /* @__PURE__ */ new Map();
+    this.submissionVotes = /* @__PURE__ */ new Map();
     for (const place of INITIAL_PLACES) {
       if (isWithinLaLibertad(place.coordinates)) {
         this.places.set(place.id, place);
@@ -51793,6 +51797,12 @@ var CatalogRepository = class {
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
+    if (this.itineraries.size >= MAX_IN_MEMORY_ITINERARIES) {
+      const oldestKey = this.itineraries.keys().next().value;
+      if (oldestKey) {
+        this.itineraries.delete(oldestKey);
+      }
+    }
     this.itineraries.set(id, newItinerary);
     return { itinerary: newItinerary };
   }
@@ -51867,6 +51877,12 @@ var CatalogRepository = class {
     };
   }
   createCampaign(data) {
+    if (this.campaigns.size >= MAX_IN_MEMORY_CAMPAIGNS) {
+      const oldestKey = this.campaigns.keys().next().value;
+      if (oldestKey) {
+        this.campaigns.delete(oldestKey);
+      }
+    }
     const id = `camp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newCampaign = {
       ...data,
@@ -51897,11 +51913,23 @@ var CatalogRepository = class {
     campaign.submissions.push(newSubmission);
     return { submission: newSubmission };
   }
-  voteSubmission(campaignId, submissionId) {
+  voteSubmission(campaignId, submissionId, userId) {
     const campaign = this.campaigns.get(campaignId);
     if (!campaign) return { success: false, error: "Campa\xF1a no encontrada" };
     const submission = campaign.submissions.find((s) => s.id === submissionId);
     if (!submission) return { success: false, error: "Env\xEDo de video no encontrado" };
+    if (userId) {
+      const voteKey = `${campaignId}:${submissionId}`;
+      let voters = this.submissionVotes.get(voteKey);
+      if (!voters) {
+        voters = /* @__PURE__ */ new Set();
+        this.submissionVotes.set(voteKey, voters);
+      }
+      if (voters.has(userId)) {
+        return { success: false, duplicate: true, error: "Ya has votado por este video" };
+      }
+      voters.add(userId);
+    }
     submission.votesCount += 1;
     submission.viewsCount += Math.floor(Math.random() * 20) + 5;
     return { success: true, newVotes: submission.votesCount };
@@ -52063,6 +52091,79 @@ var CreateTripSchema = z.object({
       path: ["endDate"]
     });
   }
+});
+var AddActivitySchema = z.object({
+  placeId: z.string().trim().min(1, "placeId es obligatorio").max(120),
+  dayNumber: z.number().int().min(1).max(30),
+  timeSlot: z.string().trim().max(60).optional(),
+  notes: z.string().trim().max(500).optional()
+});
+var ALLOWED_VIDEO_HOSTS = [
+  "tiktok.com",
+  "www.tiktok.com",
+  "vm.tiktok.com",
+  "vt.tiktok.com",
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "youtu.be",
+  "instagram.com",
+  "www.instagram.com"
+];
+var allowedVideoUrlSchema = z.string().trim().url("El enlace del video debe ser una URL v\xE1lida").max(500).refine(
+  (val) => {
+    try {
+      const parsed = new URL(val);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+      const host = parsed.hostname.toLowerCase();
+      return ALLOWED_VIDEO_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+    } catch {
+      return false;
+    }
+  },
+  { message: "El video debe pertenecer a TikTok, YouTube o Instagram" }
+);
+var safeHttpsUrlSchema = z.string().trim().url("URL inv\xE1lida").max(500).refine((val) => {
+  try {
+    const parsed = new URL(val);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}, { message: "La URL debe usar protocolo HTTP o HTTPS" });
+var CreateCampaignSchema = z.object({
+  title: z.string().trim().min(3, "El t\xEDtulo debe tener al menos 3 caracteres").max(120),
+  businessName: z.string().trim().min(2, "El nombre del local es obligatorio").max(100),
+  placeId: z.string().trim().max(120).optional(),
+  localityId: z.string().trim().max(60).optional(),
+  startDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "startDate debe tener formato AAAA-MM-DD"),
+  endDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "endDate debe tener formato AAAA-MM-DD"),
+  description: z.string().trim().max(1e3).optional(),
+  videoBrief: z.string().trim().max(1e3).optional(),
+  requirements: z.array(z.string().trim().max(200)).max(10).optional(),
+  hashtags: z.array(z.string().trim().max(50)).max(10).optional(),
+  prizes: z.unknown().optional()
+});
+var CreateSubmissionSchema = z.object({
+  creatorName: z.string().trim().min(2, "Nombre del creador obligatorio").max(80),
+  creatorHandle: z.string().trim().max(60).optional(),
+  platform: z.enum(["tiktok", "instagram", "youtube"]).optional(),
+  videoUrl: allowedVideoUrlSchema,
+  title: z.string().trim().min(2, "T\xEDtulo obligatorio").max(150),
+  caption: z.string().trim().max(500).optional(),
+  thumbnailUrl: safeHttpsUrlSchema.optional().or(z.literal(""))
+});
+var AiChatSchema = z.object({
+  message: z.string().trim().min(1, "Mensaje requerido").max(2e3, "El mensaje no puede exceder 2000 caracteres"),
+  context: z.object({
+    destination: z.string().max(120).optional(),
+    startDate: z.string().max(30).optional(),
+    endDate: z.string().max(30).optional(),
+    places: z.array(z.string().max(120)).max(30).optional(),
+    campaignTheme: z.string().max(200).optional(),
+    businessName: z.string().max(120).optional(),
+    localityName: z.string().max(120).optional()
+  }).strict().optional()
 });
 
 // src/server/authRoutes.ts
@@ -52359,6 +52460,7 @@ init_repositories();
 // src/server/authService.ts
 init_repositories();
 import crypto3 from "crypto";
+import { promisify } from "util";
 var DEV_DEFAULT_SECRET = "libertadgo_sec_sig_7b29e01f5c6a84d3e218";
 var TOKEN_EXPIRY_DAYS = 7;
 function getSessionSecret() {
@@ -52395,20 +52497,28 @@ function validateSecurityConfig() {
     }
   }
 }
-function hashPassword(password) {
+var scryptAsync = promisify(crypto3.scrypt);
+var DUMMY_SALT = "00000000000000000000000000000000";
+async function hashPasswordAsync(password) {
   const salt = crypto3.randomBytes(16).toString("hex");
-  const derivedKey = crypto3.scryptSync(password, salt, 64).toString("hex");
+  const derivedKey = (await scryptAsync(password, salt, 64)).toString("hex");
   return `${salt}:${derivedKey}`;
 }
-function verifyPassword(password, storedHash) {
+async function verifyPasswordAsync(password, storedHash) {
   try {
     const [salt, key] = storedHash.split(":");
     if (!salt || !key) return false;
     const keyBuffer = Buffer.from(key, "hex");
-    const derivedBuffer = crypto3.scryptSync(password, salt, 64);
-    return crypto3.timingSafeEqual(keyBuffer, derivedBuffer);
+    const derivedBuffer = await scryptAsync(password, salt, 64);
+    return keyBuffer.length === derivedBuffer.length && crypto3.timingSafeEqual(keyBuffer, derivedBuffer);
   } catch {
     return false;
+  }
+}
+async function dummyPasswordCheckAsync(password) {
+  try {
+    await scryptAsync(password, DUMMY_SALT, 64);
+  } catch {
   }
 }
 function createToken(user) {
@@ -52444,11 +52554,15 @@ function verifyToken(token) {
   }
 }
 var revokedTokenHashes = /* @__PURE__ */ new Set();
+var NON_REVOKED_CACHE_TTL_MS = 60 * 1e3;
+var NON_REVOKED_CACHE_MAX_SIZE = 5e3;
+var nonRevokedTokenCache = /* @__PURE__ */ new Map();
 function hashToken(token) {
   return crypto3.createHash("sha256").update(token.trim()).digest("hex");
 }
 async function revokeToken(token, userId) {
   const tokenHash = hashToken(token);
+  nonRevokedTokenCache.delete(tokenHash);
   revokedTokenHashes.add(tokenHash);
   try {
     if (process.env.DATABASE_URL) {
@@ -52473,6 +52587,10 @@ async function isTokenRevoked(token) {
   if (revokedTokenHashes.has(tokenHash)) {
     return true;
   }
+  const cachedUntil = nonRevokedTokenCache.get(tokenHash);
+  if (cachedUntil && Date.now() < cachedUntil) {
+    return false;
+  }
   try {
     if (process.env.DATABASE_URL) {
       const { getDbPool: getDbPool2 } = await Promise.resolve().then(() => (init_dbPool(), dbPool_exports));
@@ -52482,9 +52600,15 @@ async function isTokenRevoked(token) {
         [tokenHash]
       );
       if (res.rows.length > 0) {
+        nonRevokedTokenCache.delete(tokenHash);
         revokedTokenHashes.add(tokenHash);
         return true;
       }
+      if (nonRevokedTokenCache.size >= NON_REVOKED_CACHE_MAX_SIZE) {
+        const oldestKey = nonRevokedTokenCache.keys().next().value;
+        if (oldestKey) nonRevokedTokenCache.delete(oldestKey);
+      }
+      nonRevokedTokenCache.set(tokenHash, Date.now() + NON_REVOKED_CACHE_TTL_MS);
     }
   } catch {
   }
@@ -52561,7 +52685,7 @@ async function bootstrapAdminFromEnv() {
       console.log(`[Security] Bootstrapping initial admin account for: ${email}`);
       await authRepo.createUser({
         email,
-        passwordHash: hashPassword(password),
+        passwordHash: await hashPasswordAsync(password),
         name,
         role: "ADMIN"
       });
@@ -52603,10 +52727,12 @@ function csrfProtectionMiddleware(req, res, next) {
   if (origin) {
     try {
       const originUrl = new URL(origin);
-      const expectedHost = req.headers["x-forwarded-host"] || req.headers.host;
+      const expectedHost = req.headers.host;
+      const isDev = process.env.NODE_ENV !== "production";
+      const isLocalOrigin = isDev && (originUrl.hostname === "localhost" || originUrl.hostname === "127.0.0.1");
       if (expectedHost) {
         const expectedHostName = (Array.isArray(expectedHost) ? expectedHost[0] : expectedHost).split(":")[0];
-        if (originUrl.hostname !== expectedHostName && originUrl.hostname !== "localhost" && originUrl.hostname !== "127.0.0.1") {
+        if (originUrl.hostname !== expectedHostName && !isLocalOrigin) {
           res.status(403).json({
             success: false,
             error: "Solicitud bloqueada por protecci\xF3n CSRF: encabezado Origin no coincide con el host."
@@ -52690,6 +52816,69 @@ var saveVideoRateLimiter = createRateLimiter({
   message: "L\xEDmite de guardado en favoritos alcanzado. Espera un momento.",
   keyGenerator: (req) => req.user?.userId || req.ip || "anon_saver"
 });
+var aiRateLimiter = createRateLimiter({
+  windowMs: 60 * 1e3,
+  maxRequests: 3,
+  message: "Demasiadas consultas al asistente IA. Espera un minuto.",
+  keyGenerator: (req) => req.user?.userId || req.ip || "anon_ai"
+});
+var campaignRateLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1e3,
+  maxRequests: 5,
+  message: "L\xEDmite de creaci\xF3n de campa\xF1as alcanzado. Intenta m\xE1s tarde.",
+  keyGenerator: (req) => req.user?.userId || req.ip || "anon_campaign"
+});
+var voteRateLimiter = createRateLimiter({
+  windowMs: 60 * 1e3,
+  maxRequests: 20,
+  message: "Demasiados votos en poco tiempo. Espera un momento.",
+  keyGenerator: (req) => req.user?.userId || req.ip || "anon_voter"
+});
+var itineraryRateLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1e3,
+  maxRequests: 20,
+  message: "L\xEDmite de creaci\xF3n de itinerarios alcanzado. Espera unos minutos.",
+  keyGenerator: (req) => req.user?.userId || req.ip || "anon_itinerary"
+});
+var AI_FREE_CREDITS_CAP = 10;
+var AI_CREDITS_WINDOW_MS = 24 * 60 * 60 * 1e3;
+var AI_CREDITS_MAX_KEYS = 1e4;
+var AiCreditTracker = class {
+  constructor() {
+    this.usage = /* @__PURE__ */ new Map();
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.usage.entries()) {
+        if (now > entry.resetAt) {
+          this.usage.delete(key);
+        }
+      }
+    }, 10 * 60 * 1e3);
+    cleanupInterval.unref();
+  }
+  consumeCredit(req) {
+    const key = req.user?.userId || req.ip || req.socket.remoteAddress || "anon_ai";
+    const now = Date.now();
+    const record = this.usage.get(key);
+    if (!record || now > record.resetAt) {
+      if (this.usage.size >= AI_CREDITS_MAX_KEYS) {
+        const oldest = this.usage.keys().next().value;
+        if (oldest) this.usage.delete(oldest);
+      }
+      this.usage.set(key, { used: 1, resetAt: now + AI_CREDITS_WINDOW_MS });
+      return { allowed: true, creditsRemaining: AI_FREE_CREDITS_CAP - 1 };
+    }
+    if (record.used >= AI_FREE_CREDITS_CAP) {
+      return { allowed: false, creditsRemaining: 0 };
+    }
+    record.used += 1;
+    return { allowed: true, creditsRemaining: AI_FREE_CREDITS_CAP - record.used };
+  }
+  clearForTesting() {
+    this.usage.clear();
+  }
+};
+var aiCreditTracker = new AiCreditTracker();
 var VideoViewDeduplicator = class {
   constructor() {
     this.recentViews = /* @__PURE__ */ new Map();
@@ -52752,7 +52941,7 @@ authRouter.post("/register", authRateLimiter, async (req, res) => {
     }
     const newUser = await authRepo.createUser({
       email,
-      passwordHash: hashPassword(password),
+      passwordHash: await hashPasswordAsync(password),
       name,
       role: "USER"
     });
@@ -52795,13 +52984,14 @@ authRouter.post("/login", authRateLimiter, async (req, res) => {
   try {
     const user = await authRepo.findUserByEmail(email);
     if (!user) {
+      await dummyPasswordCheckAsync(password);
       res.status(401).json({
         success: false,
         error: "Credenciales inv\xE1lidas. Verifica tu correo o contrase\xF1a."
       });
       return;
     }
-    const isValid = verifyPassword(password, user.passwordHash);
+    const isValid = await verifyPasswordAsync(password, user.passwordHash);
     if (!isValid) {
       res.status(401).json({
         success: false,
@@ -54307,7 +54497,7 @@ apiRouter.get("/places", async (req, res) => {
     const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
     const total = places.length;
     const startIndex = (pageNum - 1) * pageSize;
-    const paginated = limit ? places.slice(startIndex, startIndex + pageSize) : places;
+    const paginated = places.slice(startIndex, startIndex + pageSize);
     res.json({
       success: true,
       data: paginated,
@@ -54371,31 +54561,36 @@ apiRouter.get("/places/:id", async (req, res) => {
     res.status(500).json({ success: false, error: "Error al consultar lugar" });
   }
 });
+var COORDS_RE = /^-?\d{1,3}(\.\d+)?,-?\d{1,2}(\.\d+)?(;-?\d{1,3}(\.\d+)?,-?\d{1,2}(\.\d+)?){1,24}$/;
 apiRouter.get("/route", async (req, res) => {
   const coordinates = typeof req.query.coordinates === "string" ? req.query.coordinates.trim() : "";
-  if (!coordinates || !coordinates.includes(";")) {
+  if (!COORDS_RE.test(coordinates)) {
     res.status(400).json({
       success: false,
-      error: "Se requieren al menos 2 coordenadas separadas por punto y coma (ej. lng1,lat1;lng2,lat2)"
+      error: "Coordenadas inv\xE1lidas. Debe ser lng1,lat1;lng2,lat2 num\xE9rico (2 a 25 puntos)."
     });
     return;
   }
   const pairs = coordinates.split(";");
-  const isValidFormat = pairs.every((p) => {
-    const [lng, lat] = p.split(",").map(Number);
-    return !isNaN(lng) && !isNaN(lat) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  const isValidRange = pairs.every((p) => {
+    const parts = p.split(",");
+    if (parts.length !== 2) return false;
+    const lng = Number(parts[0]);
+    const lat = Number(parts[1]);
+    return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
   });
-  if (!isValidFormat) {
+  if (!isValidRange) {
     res.status(400).json({
       success: false,
-      error: "Formato de coordenadas inv\xE1lido. Debe ser longitud,latitud num\xE9rico."
+      error: "Coordenadas fuera de rango geogr\xE1fico v\xE1lido."
     });
     return;
   }
   try {
     const rawProfile = typeof req.query.profile === "string" ? req.query.profile.trim().toLowerCase() : "driving";
     const osrmProfile = rawProfile === "walking" || rawProfile === "foot" ? "foot" : "driving";
-    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${coordinates}?overview=full&geometries=geojson`;
+    const safeCoords = encodeURIComponent(coordinates).replace(/%2C/g, ",").replace(/%3B/g, ";");
+    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${safeCoords}?overview=full&geometries=geojson`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6e3);
     const osrmResponse = await fetch(osrmUrl, {
@@ -54446,7 +54641,7 @@ apiRouter.get("/route", async (req, res) => {
     });
   }
 });
-apiRouter.post("/itineraries", (req, res) => {
+apiRouter.post("/itineraries", itineraryRateLimiter, (req, res) => {
   const parseResult = CreateTripSchema.safeParse(req.body);
   if (!parseResult.success) {
     const errorMsg = parseResult.error.issues.map((e) => e.message).join(", ");
@@ -54475,11 +54670,13 @@ apiRouter.get("/itineraries/:id", (req, res) => {
   res.json({ success: true, data: itinerary });
 });
 apiRouter.post("/itineraries/:id/activities", async (req, res) => {
-  const { placeId, dayNumber, timeSlot, notes } = req.body;
-  if (!placeId || typeof dayNumber !== "number") {
-    res.status(400).json({ success: false, error: "placeId y dayNumber son obligatorios" });
+  const parseResult = AddActivitySchema.safeParse(req.body);
+  if (!parseResult.success) {
+    const errorMsg = parseResult.error.issues.map((e) => e.message).join(", ");
+    res.status(400).json({ success: false, error: errorMsg });
     return;
   }
+  const { placeId, dayNumber, timeSlot, notes } = parseResult.data;
   const result = await catalogRepository.addActivity(req.params.id, {
     placeId,
     dayNumber,
@@ -54524,12 +54721,14 @@ apiRouter.get("/campaigns/:id", (req, res) => {
   }
   res.json({ success: true, data: campaign });
 });
-apiRouter.post("/campaigns", (req, res) => {
-  const { title, businessName, placeId, localityId, startDate, endDate, description, videoBrief, requirements, hashtags, prizes } = req.body;
-  if (!title || !businessName || !startDate || !endDate) {
-    res.status(400).json({ success: false, error: "T\xEDtulo, nombre del local y fechas son requeridos" });
+apiRouter.post("/campaigns", requireAuth, campaignRateLimiter, (req, res) => {
+  const parseResult = CreateCampaignSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    const errorMsg = parseResult.error.issues.map((e) => e.message).join(", ");
+    res.status(400).json({ success: false, error: errorMsg });
     return;
   }
+  const { title, businessName, placeId, localityId, startDate, endDate, description, videoBrief, requirements, hashtags, prizes } = parseResult.data;
   const defaultPrizes = prizes || {
     first: {
       position: 1,
@@ -54569,12 +54768,14 @@ apiRouter.post("/campaigns", (req, res) => {
   });
   res.status(201).json({ success: true, data: newCampaign });
 });
-apiRouter.post("/campaigns/:id/submissions", (req, res) => {
-  const { creatorName, creatorHandle, platform, videoUrl, title, caption, thumbnailUrl } = req.body;
-  if (!creatorName || !videoUrl || !title) {
-    res.status(400).json({ success: false, error: "Nombre del creador, enlace del video y t\xEDtulo son obligatorios" });
+apiRouter.post("/campaigns/:id/submissions", requireAuth, submissionRateLimiter, (req, res) => {
+  const parseResult = CreateSubmissionSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    const errorMsg = parseResult.error.issues.map((e) => e.message).join(", ");
+    res.status(400).json({ success: false, error: errorMsg });
     return;
   }
+  const { creatorName, creatorHandle, platform, videoUrl, title, caption, thumbnailUrl } = parseResult.data;
   const result = catalogRepository.addSubmission(req.params.id, {
     creatorName,
     creatorHandle: creatorHandle || "@creador",
@@ -54590,34 +54791,45 @@ apiRouter.post("/campaigns/:id/submissions", (req, res) => {
   }
   res.status(201).json({ success: true, data: result.submission });
 });
-apiRouter.post("/campaigns/:id/submissions/:subId/vote", (req, res) => {
-  const result = catalogRepository.voteSubmission(req.params.id, req.params.subId);
+apiRouter.post("/campaigns/:id/submissions/:subId/vote", requireAuth, voteRateLimiter, (req, res) => {
+  const result = catalogRepository.voteSubmission(req.params.id, req.params.subId, req.user?.userId);
   if (!result.success) {
-    res.status(400).json({ success: false, error: result.error });
+    res.status(result.duplicate ? 409 : 400).json({ success: false, error: result.error });
     return;
   }
   res.json({ success: true, newVotes: result.newVotes });
 });
-apiRouter.post("/ai/chat", async (req, res) => {
+apiRouter.post("/ai/chat", aiRateLimiter, async (req, res) => {
   try {
-    const { message, context, remainingCredits } = req.body;
-    if (!message || typeof message !== "string") {
-      res.status(400).json({ success: false, error: "Mensaje requerido" });
+    const parseResult = AiChatSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      const errorMsg = parseResult.error.issues.map((e) => e.message).join(", ");
+      res.status(400).json({ success: false, error: errorMsg });
       return;
     }
+    const creditCheck = aiCreditTracker.consumeCredit(req);
+    if (!creditCheck.allowed) {
+      res.status(429).json({
+        success: false,
+        error: "Has alcanzado el l\xEDmite diario de 10 consultas gratuitas al asistente IA.",
+        creditsRemaining: 0,
+        freeCreditsCap: AI_FREE_CREDITS_CAP
+      });
+      return;
+    }
+    const { message, context } = parseResult.data;
     const { generateAiResponse: generateAiResponse2 } = await Promise.resolve().then(() => (init_geminiService(), geminiService_exports));
     const result = await generateAiResponse2({
       prompt: message,
       context
     });
-    const creditsLeft = typeof remainingCredits === "number" ? Math.max(0, remainingCredits - 1) : 9;
     res.json({
       success: true,
       reply: result.reply,
       modelUsed: result.modelUsed,
       source: result.source,
-      creditsRemaining: creditsLeft,
-      freeCreditsCap: 10
+      creditsRemaining: creditCheck.creditsRemaining,
+      freeCreditsCap: AI_FREE_CREDITS_CAP
     });
   } catch (error) {
     console.error("[API /api/ai/chat Error]", error);
@@ -54674,6 +54886,22 @@ function registerGracefulShutdown(server) {
 }
 async function startServer() {
   const app = express2();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https:"],
+        connectSrc: ["'self'", "https://*.openstreetmap.org", "https://router.project-osrm.org"],
+        workerSrc: ["'self'", "blob:"],
+        // maplibre-gl
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        frameAncestors: ["'none'"]
+      }
+    },
+    hsts: { maxAge: 31536e3, includeSubDomains: true }
+  }));
   let cliPort = null;
   let cliHost = "0.0.0.0";
   for (let i = 2; i < process.argv.length; i++) {
