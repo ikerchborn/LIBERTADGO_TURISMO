@@ -15,16 +15,28 @@ import {
 } from 'lucide-react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+
+if (typeof window !== 'undefined') {
+  maplibregl.setWorkerUrl(workerUrl);
+}
 import { AdminPlaceRecord, PlaceStatus } from '../../types/adminCatalog.ts';
 import { PlaceCategory, PlaceVerification, PlaceImage, PlaceOpeningHours } from '../../types/catalog.ts';
 import { LA_LIBERTAD_LOCALITIES } from '../../types/geo.ts';
-import { isWithinLaLibertad } from '../../utils/geoBoundary.ts';
+import {
+  DEFAULT_PLACE_COVER_IMAGE_URL,
+  PlaceValidationIssue,
+  formatPlaceValidationIssues,
+  getPlaceFieldLabel,
+  isValidHttpUrl,
+  validateAndBuildPlacePayload,
+} from '../../utils/placeValidation.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
 
 interface PlaceEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onPlaceSaved: (place: AdminPlaceRecord) => void;
+  onPlaceSaved: (place: AdminPlaceRecord, message?: string) => void;
   initialPlace?: AdminPlaceRecord | null;
 }
 
@@ -77,12 +89,17 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
   const [changeSummary, setChangeSummary] = useState('');
 
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<PlaceValidationIssue[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   // Map state
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const coordsRef = useRef({ lat, lng });
+  const isInternalMapUpdateRef = useRef(false);
+  coordsRef.current = { lat, lng };
 
   // Load initial data
   useEffect(() => {
@@ -135,83 +152,206 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
       setImages([
         {
           id: `img_${Date.now()}`,
-          url: 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=800&q=80',
+          url: DEFAULT_PLACE_COVER_IMAGE_URL,
           caption: 'Foto principal',
           isCover: true,
         },
       ]);
       setChangeSummary('Creación inicial');
     }
+    setActiveTab('general');
     setError(null);
+    setFieldErrors([]);
   }, [initialPlace, isOpen]);
 
-  // Map Initialization on Tab Change or Coordinate Change
-  useEffect(() => {
-    if (activeTab !== 'map' || !mapContainerRef.current) return;
-
-    if (!mapInstanceRef.current) {
-      const map = new maplibregl.Map({
-        container: mapContainerRef.current,
-        style: 'https://tiles.openfreemap.org/styles/liberty',
-        attributionControl: {
-          customAttribution:
-            '<a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
-        },
-        center: [lng, lat],
-        zoom: 14,
-      });
-
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-
-      const marker = new maplibregl.Marker({
-        color: '#E85B49',
-        draggable: true,
-      })
-        .setLngLat([lng, lat])
-        .addTo(map);
-
-      marker.on('dragend', () => {
-        const coords = marker.getLngLat();
-        setLat(Math.round(coords.lat * 100000) / 100000);
-        setLng(Math.round(coords.lng * 100000) / 100000);
-      });
-
-      map.on('click', (e) => {
-        marker.setLngLat(e.lngLat);
-        setLat(Math.round(e.lngLat.lat * 100000) / 100000);
-        setLng(Math.round(e.lngLat.lng * 100000) / 100000);
-      });
-
-      mapInstanceRef.current = map;
-      markerRef.current = marker;
-    } else {
-      mapInstanceRef.current.resize();
-      mapInstanceRef.current.setCenter([lng, lat]);
-      if (markerRef.current) {
-        markerRef.current.setLngLat([lng, lat]);
-      }
+  // Helper to destroy MapLibre instance and observers cleanly
+  const destroyMapInstance = () => {
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    if (markerRef.current) {
+      markerRef.current.remove();
+      markerRef.current = null;
     }
-  }, [activeTab, lat, lng]);
-
-  // Clean up map on close
-  useEffect(() => {
-    if (!isOpen && mapInstanceRef.current) {
+    if (mapInstanceRef.current) {
       mapInstanceRef.current.remove();
       mapInstanceRef.current = null;
-      markerRef.current = null;
+    }
+  };
+
+  // Lazy MapLibre initialization & resize on tab visibility changes
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'map') return;
+    if (!mapContainerRef.current) return;
+
+    let cancelled = false;
+    let initRafId: number | null = null;
+    let postPaintRafId: number | null = null;
+
+    const ensureMapReady = () => {
+      if (cancelled) return;
+      const container = mapContainerRef.current;
+      if (!container) return;
+
+      const hasValidDimensions = container.clientWidth > 0 && container.clientHeight > 0;
+      if (!hasValidDimensions) {
+        initRafId = window.requestAnimationFrame(ensureMapReady);
+        return;
+      }
+
+      const rawCoords = coordsRef.current;
+      const currentLat = Number.isFinite(rawCoords.lat) ? rawCoords.lat : -8.1118;
+      const currentLng = Number.isFinite(rawCoords.lng) ? rawCoords.lng : -79.0287;
+
+      if (!mapInstanceRef.current) {
+        const map = new maplibregl.Map({
+          container,
+          style: 'https://tiles.openfreemap.org/styles/liberty',
+          attributionControl: {
+            customAttribution:
+              '<a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
+          },
+          center: [currentLng, currentLat],
+          zoom: 14,
+        });
+
+        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+        const marker = new maplibregl.Marker({
+          color: '#E85B49',
+          draggable: true,
+        })
+          .setLngLat([currentLng, currentLat])
+          .addTo(map);
+
+        marker.on('dragend', () => {
+          const coords = marker.getLngLat();
+          isInternalMapUpdateRef.current = true;
+          setLat(Math.round(coords.lat * 100000) / 100000);
+          setLng(Math.round(coords.lng * 100000) / 100000);
+        });
+
+        map.on('click', (e) => {
+          marker.setLngLat(e.lngLat);
+          isInternalMapUpdateRef.current = true;
+          setLat(Math.round(e.lngLat.lat * 100000) / 100000);
+          setLng(Math.round(e.lngLat.lng * 100000) / 100000);
+        });
+
+        map.on('load', () => {
+          const el = mapContainerRef.current;
+          if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+            map.resize();
+          }
+        });
+
+        if (typeof ResizeObserver !== 'undefined' && !resizeObserverRef.current) {
+          const observer = new ResizeObserver(() => {
+            const el = mapContainerRef.current;
+            if (el && el.clientWidth > 0 && el.clientHeight > 0 && mapInstanceRef.current) {
+              mapInstanceRef.current.resize();
+            }
+          });
+          observer.observe(container);
+          resizeObserverRef.current = observer;
+        }
+
+        mapInstanceRef.current = map;
+        markerRef.current = marker;
+      } else {
+        mapInstanceRef.current.resize();
+        markerRef.current?.setLngLat([currentLng, currentLat]);
+        mapInstanceRef.current.setCenter([currentLng, currentLat]);
+      }
+
+      postPaintRafId = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        const el = mapContainerRef.current;
+        if (el && el.clientWidth > 0 && el.clientHeight > 0 && mapInstanceRef.current) {
+          mapInstanceRef.current.resize();
+        }
+      });
+    };
+
+    ensureMapReady();
+
+    return () => {
+      cancelled = true;
+      if (initRafId !== null) window.cancelAnimationFrame(initRafId);
+      if (postPaintRafId !== null) window.cancelAnimationFrame(postPaintRafId);
+    };
+  }, [isOpen, activeTab]);
+
+  // Synchronize marker & center when lat/lng state changes
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const marker = markerRef.current;
+    if (!map || !marker) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    marker.setLngLat([lng, lat]);
+    if (isInternalMapUpdateRef.current) {
+      isInternalMapUpdateRef.current = false;
+    } else {
+      map.setCenter([lng, lat]);
+    }
+  }, [lat, lng]);
+
+  // Clean up map when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      destroyMapInstance();
     }
   }, [isOpen]);
 
+  // Ensure cleanup on unmount
+  useEffect(() => {
+    return () => {
+      destroyMapInstance();
+    };
+  }, []);
+
   if (!isOpen) return null;
 
+  const hasFieldError = (field: string) =>
+    fieldErrors.some((issue) => issue.field === field || issue.field.startsWith(`${field}.`));
+
+  const getFieldError = (field: string) =>
+    fieldErrors.find((issue) => issue.field === field || issue.field.startsWith(`${field}.`))?.message;
+
+  const focusTabForField = (field: string) => {
+    if (['name', 'category', 'subcategory', 'localityId', 'address', 'shortDescription', 'fullDescription', 'tags'].includes(field)) {
+      setActiveTab('general');
+    } else if (field === 'coordinates' || field.startsWith('coordinates.')) {
+      setActiveTab('map');
+    } else if (['phone', 'email', 'website', 'mapsUrl', 'priceLevel', 'recommendedDurationMinutes', 'safetyScore'].includes(field)) {
+      setActiveTab('contact');
+    } else if (field === 'images' || field.startsWith('images.')) {
+      setActiveTab('media');
+    } else if (['status', 'verification', 'changeSummary'].includes(field) || field.startsWith('verification.')) {
+      setActiveTab('verification');
+    }
+  };
+
   const handleAddImage = () => {
-    if (!newImageUrl.trim()) return;
+    const trimmedUrl = newImageUrl.trim();
+    if (!trimmedUrl) return;
+    if (!isValidHttpUrl(trimmedUrl)) {
+      const issue: PlaceValidationIssue = {
+        field: 'images',
+        message: 'La URL de la imagen debe iniciar con http:// o https://.',
+      };
+      setFieldErrors([issue]);
+      setError(formatPlaceValidationIssues([issue]));
+      return;
+    }
+    setError(null);
+    setFieldErrors((prev) => prev.filter((item) => item.field !== 'images'));
     setImages((prev) => [
       ...prev,
       {
         id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
-        url: newImageUrl.trim(),
-        caption: name || 'Imagen de establecimiento',
+        url: trimmedUrl,
+        caption: name.trim() || 'Imagen de establecimiento',
         isCover: prev.length === 0,
       },
     ]);
@@ -240,68 +380,42 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors([]);
 
-    // Validation
-    if (!name.trim()) {
-      setError('El nombre del lugar es obligatorio.');
-      return;
-    }
-    if (!address.trim()) {
-      setError('La dirección física es obligatoria.');
-      return;
-    }
-    if (!shortDescription.trim()) {
-      setError('La descripción breve es obligatoria.');
-      return;
-    }
-
-    if (!isWithinLaLibertad({ lat, lng })) {
-      setError('Las coordenadas deben estar ubicadas dentro del departamento de La Libertad, Perú.');
-      return;
-    }
-
-    const selectedLocalityObj = LA_LIBERTAD_LOCALITIES.find((l) => l.id === localityId);
-    const localityName = selectedLocalityObj ? selectedLocalityObj.name : 'La Libertad';
-
-    const tags = tagsInput
-      .split(',')
-      .map((t) => t.trim().toLowerCase())
-      .filter((t) => t.length > 0);
-
-    const payload = {
-      name: name.trim(),
+    const validation = validateAndBuildPlacePayload({
+      name,
       category,
-      subcategory: subcategory.trim() || undefined,
+      subcategory,
       localityId,
-      localityName,
-      address: address.trim(),
+      address,
       coordinates: { lat, lng },
-      shortDescription: shortDescription.trim(),
-      fullDescription: fullDescription.trim() || undefined,
-      phone: phone.trim() || undefined,
-      email: email.trim() || undefined,
-      website: website.trim() || undefined,
-      mapsUrl: mapsUrl.trim() || undefined,
-      priceLevel: priceLevel as 1 | 2 | 3 | 4,
+      shortDescription,
+      fullDescription,
+      phone,
+      email,
+      website,
+      mapsUrl,
+      priceLevel,
       recommendedDurationMinutes,
       status,
-      verification: {
-        isVerified,
-        verificationLevel,
-        notes: verificationNotes.trim() || undefined,
-      },
+      isVerified,
+      verificationLevel,
+      verificationNotes,
       safetyScore,
-      tags: tags.length > 0 ? tags : ['turismo', 'la-libertad'],
-      images: images.length > 0 ? images : [
-        {
-          id: `img_${Date.now()}`,
-          url: 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=800&q=80',
-          caption: name,
-          isCover: true,
-        },
-      ],
-      changeSummary: changeSummary.trim() || (initialPlace ? 'Actualización de datos' : 'Creación inicial'),
-    };
+      tagsInput,
+      images,
+      changeSummary,
+      isEdit: Boolean(initialPlace),
+    });
+
+    if (!validation.valid || !validation.payload) {
+      setFieldErrors(validation.issues);
+      setError(formatPlaceValidationIssues(validation.issues));
+      if (validation.issues[0]?.field) {
+        focusTabForField(validation.issues[0].field);
+      }
+      return;
+    }
 
     setIsSaving(true);
 
@@ -309,21 +423,45 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
       const url = initialPlace ? `/api/admin/places/${initialPlace.id}` : '/api/admin/places';
       const method = initialPlace ? 'PUT' : 'POST';
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(url, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
+        credentials: 'include',
+        headers,
+        body: JSON.stringify(validation.payload),
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || 'Error al guardar el lugar');
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        const serverDetails: PlaceValidationIssue[] = Array.isArray(json?.details)
+          ? json.details
+              .filter((d: unknown): d is { field?: unknown; message?: unknown } => Boolean(d && typeof d === 'object'))
+              .map((d: { field?: unknown; message?: unknown }) => ({
+                field: typeof d.field === 'string' ? d.field : '',
+                message: typeof d.message === 'string' ? d.message : 'Valor inválido',
+              }))
+          : [];
+
+        if (serverDetails.length > 0) {
+          setFieldErrors(serverDetails);
+          focusTabForField(serverDetails[0].field);
+          throw new Error(json?.error || formatPlaceValidationIssues(serverDetails));
+        }
+
+        throw new Error(json?.error || 'Error al guardar el lugar');
       }
 
-      onPlaceSaved(json.data);
+      onPlaceSaved(
+        json.data,
+        json.message ||
+          (initialPlace
+            ? `Cambios guardados en "${json.data?.name || name.trim()}".`
+            : `Lugar "${json.data?.name || name.trim()}" creado correctamente.`)
+      );
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al guardar cambios');
@@ -383,11 +521,22 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
+        <form noValidate onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-              <span>{error}</span>
+            <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-semibold">{error}</p>
+                {fieldErrors.length > 1 && (
+                  <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+                    {fieldErrors.map((issue, idx) => (
+                      <li key={`${issue.field}_${idx}`}>
+                        <strong>{getPlaceFieldLabel(issue.field)}:</strong> {issue.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
 
@@ -404,9 +553,13 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ej. Huaca de la Luna"
-                    required
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49] focus:bg-white"
+                    className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none focus:bg-white ${
+                      hasFieldError('name') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                    }`}
                   />
+                  {getFieldError('name') && (
+                    <p className="text-[11px] text-red-600 mt-1">{getFieldError('name')}</p>
+                  )}
                 </div>
 
                 <div>
@@ -416,7 +569,9 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value as PlaceCategory)}
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49] focus:bg-white capitalize"
+                    className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none focus:bg-white capitalize ${
+                      hasFieldError('category') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                    }`}
                   >
                     {CATEGORIES.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -424,6 +579,9 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                       </option>
                     ))}
                   </select>
+                  {getFieldError('category') && (
+                    <p className="text-[11px] text-red-600 mt-1">{getFieldError('category')}</p>
+                  )}
                 </div>
               </div>
 
@@ -448,14 +606,20 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                   <select
                     value={localityId}
                     onChange={(e) => setLocalityId(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49] focus:bg-white"
+                    className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none focus:bg-white ${
+                      hasFieldError('localityId') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                    }`}
                   >
+                    <option value="">Selecciona una localidad...</option>
                     {LA_LIBERTAD_LOCALITIES.map((loc) => (
                       <option key={loc.id} value={loc.id}>
                         {loc.name}
                       </option>
                     ))}
                   </select>
+                  {getFieldError('localityId') && (
+                    <p className="text-[11px] text-red-600 mt-1">{getFieldError('localityId')}</p>
+                  )}
                 </div>
               </div>
 
@@ -468,9 +632,13 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="Ej. Campiña de Moche, Trujillo"
-                  required
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49] focus:bg-white"
+                  className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none focus:bg-white ${
+                    hasFieldError('address') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                  }`}
                 />
+                {getFieldError('address') && (
+                  <p className="text-[11px] text-red-600 mt-1">{getFieldError('address')}</p>
+                )}
               </div>
 
               <div>
@@ -482,9 +650,13 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                   onChange={(e) => setShortDescription(e.target.value)}
                   rows={2}
                   placeholder="Descripción concisa visible en el planificador..."
-                  required
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49] focus:bg-white"
+                  className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none focus:bg-white ${
+                    hasFieldError('shortDescription') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                  }`}
                 />
+                {getFieldError('shortDescription') && (
+                  <p className="text-[11px] text-red-600 mt-1">{getFieldError('shortDescription')}</p>
+                )}
               </div>
 
               <div>
@@ -515,9 +687,8 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: MAP & GPS */}
-          {activeTab === 'map' && (
-            <div className="space-y-4">
+          {/* TAB 2: MAP & GPS (kept mounted while hidden so MapLibre canvas persists across tab switches) */}
+          <div className={activeTab === 'map' ? 'space-y-4' : 'hidden'}>
               <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-xs flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-[#E85B49] shrink-0" />
                 <span>
@@ -547,18 +718,22 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                     step="0.00001"
                     value={lng}
                     onChange={(e) => setLng(parseFloat(e.target.value) || 0)}
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg font-mono focus:outline-none focus:border-[#E85B49]"
+                    className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg font-mono focus:outline-none ${
+                      hasFieldError('coordinates') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                    }`}
                   />
                 </div>
               </div>
+              {getFieldError('coordinates') && (
+                <p className="text-[11px] text-red-600">{getFieldError('coordinates')}</p>
+              )}
 
               {/* Map Container */}
               <div
                 ref={mapContainerRef}
-                className="w-full h-80 rounded-xl border border-slate-300 overflow-hidden shadow-inner"
+                className="w-full h-80 min-h-[320px] rounded-xl border border-slate-300 overflow-hidden shadow-inner bg-slate-100"
               />
-            </div>
-          )}
+          </div>
 
           {/* TAB 3: CONTACT & DETAILS */}
           {activeTab === 'contact' && (
@@ -586,8 +761,13 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="contacto@huacasdemoche.pe"
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                    className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none ${
+                      hasFieldError('email') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                    }`}
                   />
+                  {getFieldError('email') && (
+                    <p className="text-[11px] text-red-600 mt-1">{getFieldError('email')}</p>
+                  )}
                 </div>
 
                 <div>
@@ -599,8 +779,13 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                     value={website}
                     onChange={(e) => setWebsite(e.target.value)}
                     placeholder="https://huacasdemoche.pe"
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                    className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none ${
+                      hasFieldError('website') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                    }`}
                   />
+                  {getFieldError('website') && (
+                    <p className="text-[11px] text-red-600 mt-1">{getFieldError('website')}</p>
+                  )}
                 </div>
               </div>
 
@@ -659,8 +844,13 @@ export const PlaceEditorModal: React.FC<PlaceEditorModalProps> = ({
                   value={mapsUrl}
                   onChange={(e) => setMapsUrl(e.target.value)}
                   placeholder="https://maps.google.com/?cid=..."
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#E85B49]"
+                  className={`w-full text-xs p-2.5 bg-slate-50 border rounded-lg focus:outline-none ${
+                    hasFieldError('mapsUrl') ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-[#E85B49]'
+                  }`}
                 />
+                {getFieldError('mapsUrl') && (
+                  <p className="text-[11px] text-red-600 mt-1">{getFieldError('mapsUrl')}</p>
+                )}
               </div>
             </div>
           )}

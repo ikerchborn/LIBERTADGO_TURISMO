@@ -337,14 +337,20 @@ export class PostgresPlaceRepository implements IPlaceRepository {
     const values: any[] = [];
     let idx = 1;
 
-    if (filters?.search) {
-      const q = `%${filters.search.toLowerCase().trim()}%`;
+    const trimmedSearch = filters?.search?.trim();
+    if (trimmedSearch) {
+      const q = `%${trimmedSearch.toLowerCase()}%`;
       conditions.push(`(
         LOWER(name) LIKE $${idx} OR
         LOWER(address) LIKE $${idx} OR
         LOWER(locality_name) LIKE $${idx} OR
         LOWER(category) LIKE $${idx} OR
-        LOWER(id) LIKE $${idx}
+        LOWER(id) LIKE $${idx} OR
+        EXISTS (
+          SELECT 1
+          FROM unnest(COALESCE(tags, ARRAY[]::text[])) AS tag
+          WHERE LOWER(tag) LIKE $${idx}
+        )
       )`);
       values.push(q);
       idx++;
@@ -403,23 +409,30 @@ export class PostgresPlaceRepository implements IPlaceRepository {
     `;
     const dataRes = await this.pool.query(dataQuery, [...values, limit, offset]);
 
-    const places: AdminPlaceRecord[] = [];
-    for (const row of dataRes.rows) {
+    const placeIds = dataRes.rows.map((row) => row.id);
+    const imagesByPlaceId = new Map<string, PlaceImage[]>();
+    if (placeIds.length > 0) {
       const imgRes = await this.pool.query(
-        'SELECT * FROM place_images WHERE place_id = $1 ORDER BY order_index ASC',
-        [row.id]
+        'SELECT * FROM place_images WHERE place_id = ANY($1::text[]) ORDER BY order_index ASC',
+        [placeIds]
       );
-      const images: PlaceImage[] = imgRes.rows.map((img) => ({
-        id: img.id,
-        url: img.url,
-        caption: img.caption || undefined,
-        author: img.author || undefined,
-        license: img.license || undefined,
-        isCover: Boolean(img.is_cover),
-      }));
-
-      places.push(this.mapRowToPlace(row, images));
+      for (const img of imgRes.rows) {
+        const list = imagesByPlaceId.get(img.place_id) || [];
+        list.push({
+          id: img.id,
+          url: img.url,
+          caption: img.caption || undefined,
+          author: img.author || undefined,
+          license: img.license || undefined,
+          isCover: Boolean(img.is_cover),
+        });
+        imagesByPlaceId.set(img.place_id, list);
+      }
     }
+
+    const places: AdminPlaceRecord[] = dataRes.rows.map((row) =>
+      this.mapRowToPlace(row, imagesByPlaceId.get(row.id) || [])
+    );
 
     return {
       places,
@@ -500,9 +513,11 @@ export class PostgresPlaceRepository implements IPlaceRepository {
 
       const id = data.id || `place_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const baseSlug = (data.name || 'nuevo-lugar')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '');
+        .replace(/(^-|-$)/g, '') || 'nuevo-lugar';
       let slug = baseSlug;
       let counter = 1;
       while (true) {

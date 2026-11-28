@@ -3,31 +3,48 @@ import { LA_LIBERTAD_LOCALITIES } from '../types/geo.ts';
 import { AdminPlaceRecord, PlaceStatus } from '../types/adminCatalog.ts';
 import { requireAdmin, requireAuth } from './authService.ts';
 import { getPlaceRepository } from './repositories/placeRepository.ts';
-import { adminRouter } from './adminRoutes.ts';
-import { CreatePlaceSchema, UpdatePlaceSchema, UpdatePlaceStatusSchema } from './placesSchemas.ts';
+import { CreatePlaceSchema, ListPlacesQuerySchema, UpdatePlaceSchema, UpdatePlaceStatusSchema } from './placesSchemas.ts';
+import { formatPlaceValidationIssues } from '../utils/placeValidation.ts';
 
-// Attach to the existing protected administration router: no public mutation surface is added.
-const placesRouter = Router();
+// Protected places administration router mounted under /api/admin/places in adminRoutes.ts
+export const placesRouter = Router();
 placesRouter.use(requireAuth, requireAdmin);
 
-const validationResponse = (res: Response, error: { issues: Array<{ path: PropertyKey[]; message: string }> }) => {
+const validationResponse = (
+  res: Response,
+  error: { issues: Array<{ path: PropertyKey[]; message: string; keys?: string[] }> }
+) => {
+  const details = error.issues.map((issue) => {
+    const pathField = issue.path.map(String).join('.');
+    const field = pathField || (Array.isArray(issue.keys) && issue.keys.length > 0 ? issue.keys.join(', ') : 'payload');
+    return { field, message: issue.message };
+  });
   res.status(400).json({
     success: false,
-    error: 'Revisa los campos indicados.',
-    details: error.issues.map((issue) => ({ field: issue.path.map(String).join('.'), message: issue.message })),
+    error: `Revisa los campos indicados: ${formatPlaceValidationIssues(details)}`,
+    details,
   });
 };
 
 placesRouter.get('/', async (req: Request, res: Response) => {
+  const parsed = ListPlacesQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    validationResponse(res, parsed.error);
+    return;
+  }
+
   try {
+    const { search, status, category, localityId, isVerified, page, limit, sortBy, sortOrder } = parsed.data;
     const result = await getPlaceRepository().listPlaces({
-      search: typeof req.query.search === 'string' ? req.query.search : undefined,
-      status: typeof req.query.status === 'string' ? req.query.status as PlaceStatus | 'ALL' : 'ALL',
-      category: typeof req.query.category === 'string' ? req.query.category as never : undefined,
-      localityId: typeof req.query.localityId === 'string' ? req.query.localityId : undefined,
-      isVerified: typeof req.query.isVerified === 'string' ? req.query.isVerified === 'true' : 'ALL',
-      page: Math.max(1, Number(req.query.page) || 1),
-      limit: Math.min(100, Math.max(1, Number(req.query.limit) || 20)),
+      search,
+      status,
+      category,
+      localityId,
+      isVerified,
+      page,
+      limit,
+      sortBy,
+      sortOrder,
     });
     res.json({ success: true, data: result.places, total: result.total, page: result.page, totalPages: result.totalPages });
   } catch (error) {
@@ -50,7 +67,7 @@ placesRouter.post('/', async (req: Request, res: Response) => {
     res.status(401).json({ success: false, error: 'Autenticación requerida' });
     return;
   }
-  const parsed = CreatePlaceSchema.safeParse(req.body);
+  const parsed = CreatePlaceSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     validationResponse(res, parsed.error);
     return;
@@ -58,10 +75,15 @@ placesRouter.post('/', async (req: Request, res: Response) => {
   try {
     const locality = LA_LIBERTAD_LOCALITIES.find((item) => item.id === parsed.data.localityId);
     if (!locality) {
-      res.status(400).json({ success: false, error: 'Selecciona una localidad válida de La Libertad.', details: [{ field: 'localityId', message: 'La localidad seleccionada no existe.' }] });
+      res.status(400).json({
+        success: false,
+        error: 'Localidad (La Libertad): Selecciona una localidad válida de La Libertad.',
+        details: [{ field: 'localityId', message: 'La localidad seleccionada no existe.' }],
+      });
       return;
     }
-    const data = { ...parsed.data, localityName: locality.name } as Partial<AdminPlaceRecord>;
+    const { changeSummary: _changeSummary, ...fields } = parsed.data;
+    const data = { ...fields, localityName: locality.name } as Partial<AdminPlaceRecord>;
     const place = await getPlaceRepository().createPlace(data, req.user.userId, req.user.name);
     res.status(201).json({ success: true, data: place, message: 'Lugar creado correctamente' });
   } catch (error) {
@@ -94,7 +116,7 @@ placesRouter.put('/:id', async (req: Request, res: Response) => {
       return;
     }
     const { changeSummary, ...fields } = parsed.data;
-    const updated = await repo.updatePlace(req.params.id, { ...fields, localityName: locality.name }, req.user.userId, req.user.name, changeSummary);
+    const updated = await repo.updatePlace(req.params.id, { ...(fields as Partial<AdminPlaceRecord>), localityName: locality.name }, req.user.userId, req.user.name, changeSummary);
     if (!updated) {
       res.status(404).json({ success: false, error: 'Lugar no encontrado' });
       return;
@@ -128,5 +150,3 @@ placesRouter.patch('/:id/status', async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: 'Error al actualizar el estado del lugar' });
   }
 });
-
-adminRouter.use('/places', placesRouter);

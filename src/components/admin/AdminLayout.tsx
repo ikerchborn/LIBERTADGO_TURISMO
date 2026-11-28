@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { CheckCircle2, X } from 'lucide-react';
 import { AdminSidebar, AdminSection } from './AdminSidebar.tsx';
 import { AdminHeader } from './AdminHeader.tsx';
 import { DashboardView } from './DashboardView.tsx';
@@ -25,14 +26,18 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onGoToPublicApp }) => 
   const [editingPlace, setEditingPlace] = useState<AdminPlaceRecord | null>(null);
 
   const [placesRefreshKey, setPlacesRefreshKey] = useState(0);
-  const handlePlaceSaved = () => {
-  setPlacesRefreshKey((current) => current + 1);
-};
+  const [placeNotification, setPlaceNotification] = useState<string | null>(null);
+
+  const handlePlaceSaved = (place: AdminPlaceRecord, message?: string) => {
+    setPlacesRefreshKey((current) => current + 1);
+    setPlaceNotification(message || `Lugar "${place.name}" guardado correctamente.`);
+  };
 
   // Place history audit modal state
   const [historyPlace, setHistoryPlace] = useState<{ id: string; name: string } | null>(null);
 
   const handleOpenCreateModal = () => {
+    setPlaceNotification(null);
     setEditingPlace(null);
     setIsEditorOpen(true);
   };
@@ -71,6 +76,25 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onGoToPublicApp }) => 
         />
 
         <main className="flex-1 overflow-y-auto bg-slate-50">
+          {placeNotification && (activeSection === 'places' || activeSection === 'dashboard') && (
+            <div className="px-6 lg:px-8 pt-6 max-w-7xl mx-auto">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{placeNotification}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPlaceNotification(null)}
+                  aria-label="Cerrar notificación"
+                  className="text-emerald-700 hover:text-emerald-900 p-0.5 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {activeSection === 'dashboard' && (
             <DashboardView
               onNavigateSection={setActiveSection}

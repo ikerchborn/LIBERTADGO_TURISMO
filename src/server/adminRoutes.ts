@@ -7,12 +7,18 @@ import {
   AdminUpdateCreatorSchema,
   AdminUpdateVideoPlacesSchema,
 } from './creatorsSchemas.ts';
-import { getCreatorsRepository, getAuthRepository } from './repositories/index.ts';
+import { getCreatorsRepository, getAuthRepository, ICreatorsRepository } from './repositories/index.ts';
+import { getPlaceRepository, IPlaceRepository } from './repositories/placeRepository.ts';
 import { requireAuth, requireAdmin } from './authService.ts';
 import {
   ModerationStatus,
   ModerationAuditPayload,
 } from '../types/creators.ts';
+import {
+  AdminDashboardMetrics,
+  AuditModule,
+  UnifiedAuditEntry,
+} from '../types/adminCatalog.ts';
 import { INITIAL_PLACES } from '../data/initialPlaces.ts';
 import { parseAndValidateVideoUrl } from '../utils/videoUrlParser.ts';
 import {
@@ -22,10 +28,504 @@ import {
   MAX_AVATAR_SIZE_BYTES,
   ALLOWED_MIME_TYPES,
 } from './services/storageService.ts';
+import { MergeDuplicatesSchema } from './placesSchemas.ts';
+import { placesRouter } from './adminPlacesRoutes.ts';
 
 export const adminRouter = Router();
 
 adminRouter.use(requireAuth, requireAdmin);
+adminRouter.use('/places', placesRouter);
+
+const SHORT_MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const ALL_VIDEO_STATUSES: ModerationStatus[] = ['PENDING', 'APPROVED', 'OBSERVED', 'REJECTED', 'HIDDEN'];
+const SENSITIVE_AUDIT_KEYS = new Set(['passwordHash', 'password_hash', 'sessionSecret', 'session_secret', 'password']);
+
+function sanitizeAuditValue(value: unknown, depth = 0): unknown {
+  if (depth > 4 || value === null || value === undefined) return value ?? null;
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAuditValue(item, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (SENSITIVE_AUDIT_KEYS.has(k)) continue;
+      out[k] = sanitizeAuditValue(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+function toIsoDate(value: unknown): string {
+  if (!value) return new Date().toISOString();
+  const d = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
+async function buildUnifiedAuditEntries(
+  placeRepo: IPlaceRepository,
+  creatorsRepo: ICreatorsRepository
+): Promise<UnifiedAuditEntry[]> {
+  const [placeLogs, creatorLogs, videoLogs, placesResult] = await Promise.all([
+    placeRepo.getAuditLogs('all', 250),
+    creatorsRepo.getCreatorAuditLogs('all', 250),
+    creatorsRepo.getAllModerationLogs(250),
+    placeRepo.listPlaces({ limit: 500 }),
+  ]);
+
+  const placeNamesById = new Map<string, string>();
+  for (const p of INITIAL_PLACES) {
+    placeNamesById.set(p.id, p.name);
+  }
+  for (const p of placesResult.places) {
+    placeNamesById.set(p.id, p.name);
+  }
+
+  const unified: UnifiedAuditEntry[] = [];
+
+  for (const log of placeLogs) {
+    const prevObj = log.previousData && typeof log.previousData === 'object' ? (log.previousData as Record<string, any>) : null;
+    const newObj = log.newData && typeof log.newData === 'object' ? (log.newData as Record<string, any>) : null;
+    const entityName =
+      placeNamesById.get(log.placeId) ||
+      newObj?.name ||
+      prevObj?.name ||
+      (log.placeId === 'all' ? 'Catálogo Regional' : log.placeId);
+
+    unified.push({
+      id: `places_${log.id}`,
+      module: 'places',
+      entityId: log.placeId,
+      entityName,
+      action: log.action,
+      adminUserId: log.adminUserId || 'system',
+      adminName: log.adminName || 'Sistema RiyMo',
+      previousStatus: prevObj?.status ?? null,
+      newStatus: newObj?.status ?? null,
+      changeSummary: log.changeSummary,
+      details: sanitizeAuditValue({
+        previousData: log.previousData ?? null,
+        newData: log.newData ?? null,
+      }) as Record<string, any>,
+      createdAt: toIsoDate(log.createdAt),
+    });
+  }
+
+  for (const log of creatorLogs) {
+    const isVisibility = log.action === 'VISIBILITY_CHANGE';
+    const prevPublic = log.previousData?.isPublic;
+    const newPublic = log.newData?.isPublic;
+
+    unified.push({
+      id: `creators_${log.id}`,
+      module: 'creators',
+      entityId: log.creatorId,
+      entityName: log.creatorDisplayName
+        ? `${log.creatorDisplayName} (@${log.creatorHandle})`
+        : log.creatorHandle
+          ? `@${log.creatorHandle}`
+          : log.creatorId,
+      action: log.action,
+      adminUserId: log.adminUserId || 'system',
+      adminName: log.adminName || 'Administrador',
+      previousStatus: isVisibility && typeof prevPublic === 'boolean' ? (prevPublic ? 'Público' : 'Oculto') : null,
+      newStatus: isVisibility && typeof newPublic === 'boolean' ? (newPublic ? 'Público' : 'Oculto') : null,
+      changeSummary: log.changeSummary,
+      details: sanitizeAuditValue({
+        creatorHandle: log.creatorHandle,
+        previousData: log.previousData ?? null,
+        newData: log.newData ?? null,
+      }) as Record<string, any>,
+      createdAt: toIsoDate(log.createdAt),
+    });
+  }
+
+  for (const log of videoLogs) {
+    const summaryParts: string[] = [];
+    if (log.reason) summaryParts.push(log.reason);
+    if (log.changedFields && log.changedFields.length > 0) {
+      summaryParts.push(`Campos: ${log.changedFields.join(', ')}`);
+    }
+    const changeSummary =
+      summaryParts.join(' • ') ||
+      `Acción ${log.action} (${log.previousStatus ? `${log.previousStatus} → ` : ''}${log.newStatus})`;
+
+    unified.push({
+      id: `videos_${log.id}`,
+      module: 'videos',
+      entityId: log.videoId,
+      entityName: log.videoTitle || log.videoId,
+      action: log.action,
+      adminUserId: log.adminUserId || 'system',
+      adminName: log.adminName || 'Administrador',
+      previousStatus: log.previousStatus ?? null,
+      newStatus: log.newStatus ?? null,
+      changeSummary,
+      details: sanitizeAuditValue({
+        platform: log.videoPlatform ?? null,
+        internalNotes: log.internalNotes ?? null,
+        changedFields: log.changedFields ?? null,
+      }) as Record<string, any>,
+      createdAt: toIsoDate(log.createdAt),
+    });
+  }
+
+  return unified.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+adminRouter.get('/dashboard', async (_req: Request, res: Response) => {
+  const placeRepo = getPlaceRepository();
+  const creatorsRepo = getCreatorsRepository();
+
+  try {
+    const [placeMetrics, placesResult, allCreators, videoBatches, unifiedAudit] = await Promise.all([
+      placeRepo.getDashboardMetrics(),
+      placeRepo.listPlaces({ limit: 500 }),
+      creatorsRepo.listAllCreators(),
+      Promise.all(ALL_VIDEO_STATUSES.map((status) => creatorsRepo.listModerationQueue(status))),
+      buildUnifiedAuditEntries(placeRepo, creatorsRepo),
+    ]);
+
+    const allVideos = videoBatches.flat();
+    const videoIds = allVideos.map((v) => v.id);
+    const placesMap =
+      typeof creatorsRepo.getPlacesForVideos === 'function'
+        ? await creatorsRepo.getPlacesForVideos(videoIds)
+        : {};
+
+    // Creators cluster (100% real data)
+    const creatorByPlatform = { tiktok: 0, instagram: 0, youtube: 0 };
+    let publicCreators = 0;
+    let hiddenCreators = 0;
+    let verifiedCreators = 0;
+    let totalAudienceFollowers = 0;
+
+    const topCreators = allCreators
+      .map((c) => {
+        if (c.isPublic) publicCreators++;
+        else hiddenCreators++;
+        if (c.isVerified) verifiedCreators++;
+
+        if (c.primaryPlatform === 'tiktok') creatorByPlatform.tiktok++;
+        else if (c.primaryPlatform === 'instagram') creatorByPlatform.instagram++;
+        else if (c.primaryPlatform === 'youtube') creatorByPlatform.youtube++;
+
+        const followers =
+          (Number(c.tiktokFollowers) || 0) +
+          (Number(c.instagramFollowers) || 0) +
+          (Number(c.youtubeSubscribers) || 0);
+        totalAudienceFollowers += followers;
+
+        return {
+          id: c.id,
+          handle: c.handle,
+          displayName: c.displayName,
+          avatarUrl: c.avatarUrl ?? null,
+          platform: c.primaryPlatform,
+          followers,
+          isVerified: Boolean(c.isVerified),
+          approvedVideos: c.totalApprovedVideos || 0,
+        };
+      })
+      .sort((a, b) => b.followers - a.followers || b.approvedVideos - a.approvedVideos)
+      .slice(0, 6)
+      .map(({ approvedVideos: _ignored, ...rest }) => rest);
+
+    // Videos & engagement clusters (100% real data)
+    const videoByPlatform = { tiktok: 0, instagram: 0, youtube: 0 };
+    const categoryCounts: Record<string, number> = {};
+    const placesWithVideosSet = new Set<string>();
+
+    let approved = 0;
+    let pending = 0;
+    let observed = 0;
+    let rejected = 0;
+    let totalInternalViews = 0;
+    let totalInternalSaves = 0;
+    let totalExternalViews = 0;
+    let totalExternalLikes = 0;
+    let totalExternalComments = 0;
+
+    for (const v of allVideos) {
+      if (v.status === 'APPROVED') approved++;
+      else if (v.status === 'PENDING') pending++;
+      else if (v.status === 'OBSERVED') observed++;
+      else if (v.status === 'REJECTED') rejected++;
+
+      if (v.platform === 'tiktok') videoByPlatform.tiktok++;
+      else if (v.platform === 'instagram') videoByPlatform.instagram++;
+      else if (v.platform === 'youtube') videoByPlatform.youtube++;
+
+      if (v.category) {
+        categoryCounts[v.category] = (categoryCounts[v.category] || 0) + 1;
+      }
+
+      const linkedPlaces = placesMap[v.id] || [];
+      for (const lp of linkedPlaces) {
+        placesWithVideosSet.add(lp.id);
+      }
+
+      totalInternalViews += Number(v.internalViewsCount) || 0;
+      totalInternalSaves += Number(v.internalSavesCount) || 0;
+      totalExternalViews += Number(v.externalMetrics?.views) || 0;
+      totalExternalLikes += Number(v.externalMetrics?.likes) || 0;
+      totalExternalComments += Number(v.externalMetrics?.comments) || 0;
+    }
+
+    const placesWithVideosCount = placesWithVideosSet.size;
+    const catalogCoveragePercent =
+      placeMetrics.totalPlaces > 0
+        ? Math.round((placesWithVideosCount / placeMetrics.totalPlaces) * 1000) / 10
+        : 0;
+
+    // Real chronological monthly timeline (last 6 months minimum + any active months in data)
+    const now = new Date();
+    const monthKeys = new Set<string>();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      monthKeys.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
+    }
+
+    const getMonthKey = (iso?: string | null): string | null => {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return null;
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    };
+
+    const buckets = new Map<string, { places: number; creators: number; videos: number; audits: number }>();
+    const ensureBucket = (key: string) => {
+      if (!buckets.has(key)) {
+        buckets.set(key, { places: 0, creators: 0, videos: 0, audits: 0 });
+      }
+      return buckets.get(key)!;
+    };
+
+    for (const key of monthKeys) ensureBucket(key);
+
+    for (const p of placesResult.places) {
+      const key = getMonthKey(p.createdAt);
+      if (key && buckets.has(key)) ensureBucket(key).places++;
+    }
+    for (const c of allCreators) {
+      const key = getMonthKey(c.createdAt);
+      if (key) ensureBucket(key).creators++;
+    }
+    for (const v of allVideos) {
+      const key = getMonthKey(v.createdAt);
+      if (key) ensureBucket(key).videos++;
+    }
+    for (const a of unifiedAudit) {
+      const key = getMonthKey(a.createdAt);
+      if (key) ensureBucket(key).audits++;
+    }
+
+    const timeline = Array.from(buckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-12)
+      .map(([dateKey, counts]) => {
+        const [yearStr, monthStr] = dateKey.split('-');
+        const monthIdx = Math.max(0, Math.min(11, parseInt(monthStr, 10) - 1));
+        return {
+          date: dateKey,
+          label: `${SHORT_MONTHS_ES[monthIdx]} ${yearStr}`,
+          places: counts.places,
+          creators: counts.creators,
+          videos: counts.videos,
+          audits: counts.audits,
+          total: counts.places + counts.creators + counts.videos + counts.audits,
+        };
+      });
+
+    const payload: AdminDashboardMetrics = {
+      ...placeMetrics,
+      creators: {
+        total: allCreators.length,
+        publicCount: publicCreators,
+        hiddenCount: hiddenCreators,
+        verifiedCount: verifiedCreators,
+        byPlatform: creatorByPlatform,
+        totalAudienceFollowers,
+        topCreators,
+      },
+      videos: {
+        total: allVideos.length,
+        approved,
+        pending,
+        observed,
+        rejected,
+        byPlatform: videoByPlatform,
+        byCategory: Object.entries(categoryCounts)
+          .map(([category, count]) => ({ category, count }))
+          .sort((a, b) => b.count - a.count),
+        placesWithVideosCount,
+        catalogCoveragePercent,
+      },
+      engagement: {
+        totalInternalViews,
+        totalInternalSaves,
+        totalExternalViews,
+        totalExternalLikes,
+        totalExternalComments,
+      },
+      recentActivity: unifiedAudit.slice(0, 20),
+      timeline,
+    };
+
+    res.json({ success: true, data: payload, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[Admin Error] Error generating dashboard metrics:', err);
+    res.status(500).json({ success: false, error: 'Error al consolidar métricas del panel administrativo' });
+  }
+});
+
+adminRouter.get('/audit', async (req: Request, res: Response) => {
+  const placeRepo = getPlaceRepository();
+  const creatorsRepo = getCreatorsRepository();
+
+  try {
+    const rawModule = typeof req.query.module === 'string' ? req.query.module : 'ALL';
+    const moduleFilter: 'ALL' | AuditModule =
+      rawModule === 'places' || rawModule === 'creators' || rawModule === 'videos' ? rawModule : 'ALL';
+    const actionFilter = typeof req.query.action === 'string' ? req.query.action.trim().toUpperCase() : 'ALL';
+    const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    const startDate = typeof req.query.startDate === 'string' ? req.query.startDate.trim() : '';
+    const endDate = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+
+    const startTs = startDate ? new Date(`${startDate}T00:00:00.000Z`).getTime() : null;
+    const endTs = endDate ? new Date(`${endDate}T23:59:59.999Z`).getTime() : null;
+
+    const allEntries = await buildUnifiedAuditEntries(placeRepo, creatorsRepo);
+
+    const baseFiltered = allEntries.filter((entry) => {
+      if (actionFilter && actionFilter !== 'ALL' && entry.action.toUpperCase() !== actionFilter) {
+        return false;
+      }
+      if (search) {
+        const haystack = [
+          entry.entityName,
+          entry.entityId,
+          entry.changeSummary,
+          entry.adminName,
+          entry.adminUserId,
+          entry.action,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
+      const entryTs = new Date(entry.createdAt).getTime();
+      if (startTs !== null && !Number.isNaN(startTs) && entryTs < startTs) return false;
+      if (endTs !== null && !Number.isNaN(endTs) && entryTs > endTs) return false;
+      return true;
+    });
+
+    const counts = {
+      all: baseFiltered.length,
+      places: baseFiltered.filter((e) => e.module === 'places').length,
+      creators: baseFiltered.filter((e) => e.module === 'creators').length,
+      videos: baseFiltered.filter((e) => e.module === 'videos').length,
+    };
+
+    const moduleFiltered =
+      moduleFilter === 'ALL' ? baseFiltered : baseFiltered.filter((e) => e.module === moduleFilter);
+
+    const total = moduleFiltered.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const offset = (page - 1) * limit;
+    const paginated = moduleFiltered.slice(offset, offset + limit);
+
+    res.json({
+      success: true,
+      data: paginated,
+      total,
+      page,
+      limit,
+      totalPages,
+      counts,
+    });
+  } catch (err) {
+    console.error('[Admin Error] Error fetching unified audit trail:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar historial de auditoría' });
+  }
+});
+
+adminRouter.get('/categories', async (_req: Request, res: Response) => {
+  try {
+    const data = await getPlaceRepository().getCategoriesStats();
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[Admin Error] Error fetching categories stats:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar categorías' });
+  }
+});
+
+adminRouter.get('/localities', async (_req: Request, res: Response) => {
+  try {
+    const data = await getPlaceRepository().getLocalitiesStats();
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[Admin Error] Error fetching localities stats:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar localidades' });
+  }
+});
+
+adminRouter.get('/sources', async (_req: Request, res: Response) => {
+  try {
+    const data = await getPlaceRepository().getSourcesStats();
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[Admin Error] Error fetching sources stats:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar fuentes de datos' });
+  }
+});
+
+adminRouter.get('/duplicates', async (_req: Request, res: Response) => {
+  try {
+    const data = await getPlaceRepository().findDuplicates();
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[Admin Error] Error finding duplicate places:', err);
+    res.status(500).json({ success: false, error: 'Error al detectar lugares duplicados' });
+  }
+});
+
+adminRouter.post('/duplicates/merge', async (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: 'No autorizado' });
+    return;
+  }
+  const parsed = MergeDuplicatesSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      success: false,
+      error: parsed.error.issues.map((i) => i.message).join(', '),
+    });
+    return;
+  }
+  try {
+    const result = await getPlaceRepository().mergeDuplicates(
+      parsed.data.primaryId,
+      parsed.data.duplicateIds,
+      req.user.userId,
+      req.user.name
+    );
+    res.json({
+      success: true,
+      data: result,
+      message: `Fusión completada (${result.mergedCount} duplicado(s) integrado(s))`,
+    });
+  } catch (err) {
+    console.error('[Admin Error] Error merging duplicate places:', err);
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Error al fusionar lugares duplicados',
+    });
+  }
+});
 
 adminRouter.get('/metrics', async (_req: Request, res: Response) => {
   const repo = getCreatorsRepository();

@@ -23,8 +23,11 @@ export const PlaceHistoryModal: React.FC<PlaceHistoryModalProps> = ({
   useEffect(() => {
     if (!isOpen || !placeId) return;
     setIsLoading(true);
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     fetch(`/api/admin/places/${placeId}/history`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
+      credentials: 'include',
     })
       .then((res) => res.json())
       .then((json) => {

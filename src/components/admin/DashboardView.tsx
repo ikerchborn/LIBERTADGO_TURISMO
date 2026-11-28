@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { AdminDashboardMetrics, UnifiedAuditEntry, AuditModule } from '../../types/adminCatalog.ts';
 import { AdminSection } from './AdminSidebar.tsx';
+import { useAuth } from '../../context/AuthContext.tsx';
 
 interface DashboardViewProps {
   onNavigateSection: (section: AdminSection) => void;
@@ -71,6 +72,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenCreatePlaceModal,
   refreshKey,
 }) => {
+  const { token } = useAuth();
   const [metrics, setMetrics] = useState<AdminDashboardMetrics | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,11 +87,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setIsLoading(true);
     setError(null);
     try {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/admin/dashboard', {
+        headers,
         credentials: 'include',
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('Sesión administrativa expirada o no autorizada. Vuelve a iniciar sesión.');
+        }
         throw new Error('Error al cargar métricas del panel administrativo');
       }
 
@@ -108,7 +119,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   useEffect(() => {
     fetchDashboardData();
-  }, [refreshKey]);
+  }, [refreshKey, token]);
 
   // Actividades filtradas por módulo
   const filteredActivity = useMemo(() => {

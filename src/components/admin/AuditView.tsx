@@ -137,8 +137,14 @@ export const AuditView: React.FC = () => {
         params.set('page', targetPage.toString());
         params.set('limit', '50');
 
+        const headers: Record<string, string> = {};
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const res = await fetch(`/api/admin/audit?${params.toString()}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers,
+          credentials: 'include',
         });
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
@@ -163,7 +169,7 @@ export const AuditView: React.FC = () => {
   useEffect(() => {
     fetchAuditLogs(page);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, activeModule, actionFilter, debouncedSearch, startDate, endDate]);
+  }, [page, activeModule, actionFilter, debouncedSearch, startDate, endDate, token]);
 
   // Handle escape key to close detail modal
   useEffect(() => {

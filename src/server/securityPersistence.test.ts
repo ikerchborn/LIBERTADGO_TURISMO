@@ -189,6 +189,72 @@ describe('Security & Persistence Remediation Tests', () => {
 
       assert.equal(nextCalled, true, 'Bearer token requests without ambient cookies should proceed');
     });
+
+    test('CSRF protection blocks localhost Origin targeting production host', () => {
+      let blocked = false;
+      let statusCode = 200;
+      const mockReq: any = {
+        method: 'POST',
+        headers: {
+          cookie: 'libertadgo_token=sample_token',
+          origin: 'http://localhost:5173',
+          'x-forwarded-host': 'goriymo.ai.studio',
+        },
+      };
+      const mockRes: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return {
+            json: () => {
+              blocked = true;
+            },
+          };
+        },
+      };
+
+      csrfProtectionMiddleware(mockReq, mockRes, () => {
+        blocked = false;
+      });
+
+      assert.equal(statusCode, 403, 'Localhost Origin must not bypass CSRF against production host');
+      assert.equal(blocked, true);
+    });
+
+    test('CSRF protection allows local dev Origin against local host and comma-separated same-origin proxy host', () => {
+      let localNextCalled = false;
+      csrfProtectionMiddleware(
+        {
+          method: 'PUT',
+          headers: {
+            cookie: 'libertadgo_token=sample_token',
+            origin: 'http://localhost:3000',
+            host: '127.0.0.1:3000',
+          },
+        } as any,
+        { status: () => ({ json: () => {} }) } as any,
+        () => {
+          localNextCalled = true;
+        }
+      );
+      assert.equal(localNextCalled, true);
+
+      let proxyNextCalled = false;
+      csrfProtectionMiddleware(
+        {
+          method: 'DELETE',
+          headers: {
+            cookie: 'libertadgo_token=sample_token',
+            origin: 'https://goriymo.ai.studio',
+            'x-forwarded-host': 'goriymo.ai.studio, internal-proxy',
+          },
+        } as any,
+        { status: () => ({ json: () => {} }) } as any,
+        () => {
+          proxyNextCalled = true;
+        }
+      );
+      assert.equal(proxyNextCalled, true);
+    });
   });
 
   describe('Etapa 6: ACID Transactions & Deduplication Rules', () => {

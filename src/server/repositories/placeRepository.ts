@@ -166,8 +166,9 @@ export class PlaceRepository implements IPlaceRepository {
   }> {
     let result = Array.from(this.places.values());
 
-    if (filters?.search) {
-      const q = filters.search.toLowerCase().trim();
+    const trimmedSearch = filters?.search?.trim();
+    if (trimmedSearch) {
+      const q = trimmedSearch.toLowerCase();
       result = result.filter(
         (p) =>
           p.name.toLowerCase().includes(q) ||
@@ -251,9 +252,11 @@ export class PlaceRepository implements IPlaceRepository {
   ): Promise<AdminPlaceRecord> {
     const id = data.id || `place_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const baseSlug = (data.name || 'nuevo-lugar')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
+      .replace(/(^-|-$)/g, '') || 'nuevo-lugar';
     let slug = baseSlug;
     let counter = 1;
     while (Array.from(this.places.values()).some((p) => p.slug === slug)) {

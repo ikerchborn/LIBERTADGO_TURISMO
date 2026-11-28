@@ -422,12 +422,19 @@ export function csrfProtectionMiddleware(req: Request, res: Response, next: Next
   if (origin) {
     try {
       const originUrl = new URL(origin);
-      const expectedHost = req.headers.host;
-      const isDev = process.env.NODE_ENV !== 'production';
-      const isLocalOrigin = isDev && (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1');
+      // In production, do not let an untrusted forwarded-host value override Host.
+      const expectedHost = process.env.NODE_ENV === 'production'
+        ? req.headers.host
+        : req.headers['x-forwarded-host'] || req.headers.host;
       if (expectedHost) {
-        const expectedHostName = (Array.isArray(expectedHost) ? expectedHost[0] : expectedHost).split(':')[0];
-        if (originUrl.hostname !== expectedHostName && !isLocalOrigin) {
+        const rawExpectedHost = Array.isArray(expectedHost) ? expectedHost[0] : expectedHost;
+        const expectedHostName = rawExpectedHost.split(',')[0].trim().split(':')[0].toLowerCase();
+        const originHostname = originUrl.hostname.toLowerCase();
+        const isLocalTarget = expectedHostName === 'localhost' || expectedHostName === '127.0.0.1';
+        const isLocalOrigin = originHostname === 'localhost' || originHostname === '127.0.0.1';
+        const isAllowedOrigin = originHostname === expectedHostName || (isLocalTarget && isLocalOrigin);
+
+        if (!isAllowedOrigin) {
           res.status(403).json({
             success: false,
             error: 'Solicitud bloqueada por protección CSRF: encabezado Origin no coincide con el host.',

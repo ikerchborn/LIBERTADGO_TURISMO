@@ -67,8 +67,11 @@ export const VideoHistoryModal: React.FC<VideoHistoryModalProps> = ({
   useEffect(() => {
     if (!isOpen || !videoId) return;
     setIsLoading(true);
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     fetch(`/api/admin/moderation/${videoId}/history`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
+      credentials: 'include',
     })
       .then((res) => res.json())
       .then((json) => {
